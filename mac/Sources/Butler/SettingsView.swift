@@ -1,59 +1,58 @@
-// 设置窗口：九页，改完马上生效，2 秒内同步到机器人
+// 设置窗口：八页，改完马上生效，2 秒内同步到机器人
+// 按 Apple 设计规范：顶部工具栏切换各页、窗口标题跟着当前页、下次打开回到上次那页、窗口大小跟着当前页。
 import SwiftUI
 import UniformTypeIdentifiers
 
 enum SettingsPage: String, CaseIterable, Identifiable {
-    case general, display, face, alerts, motion, quiet, data, device, about
+    case general, display, face, alerts, motion, quiet, data, device
     var id: String { rawValue }
     var title: String {
         switch self {
         case .general: return t("通用"); case .display: return t("屏幕"); case .face: return t("表情")
         case .alerts: return t("提醒"); case .motion: return t("动作与声音"); case .quiet: return t("勿扰")
-        case .data: return t("订阅与数据"); case .device: return t("设备"); case .about: return t("关于")
+        case .data: return t("订阅与数据"); case .device: return t("机器人")
         }
     }
     var symbol: String {
         switch self {
-        case .general: return "gearshape.fill"; case .display: return "display"; case .face: return "face.smiling.inverse"
-        case .alerts: return "bell.badge.fill"; case .motion: return "speaker.wave.2.fill"; case .quiet: return "moon.fill"
-        case .data: return "chart.bar.fill"; case .device: return "cpu.fill"; case .about: return "info"
+        case .general: return "gearshape"; case .display: return "display"; case .face: return "face.smiling"
+        case .alerts: return "bell.badge"; case .motion: return "speaker.wave.2"; case .quiet: return "moon"
+        case .data: return "chart.bar"; case .device: return "cpu"
         }
     }
-    var color: Color {
+    /// 每页的窗口高度（内容更长的页在里面滚动）
+    var height: CGFloat {
         switch self {
-        case .general: return .gray; case .display: return .blue; case .face: return .purple
-        case .alerts: return .red; case .motion: return .pink; case .quiet: return .indigo
-        case .data: return .green; case .device: return .orange; case .about: return .gray
+        case .general: return 440; case .quiet: return 470; case .device: return 440
+        case .face: return 560; case .motion: return 640
+        case .display, .alerts, .data: return 660
         }
     }
+    static let width: CGFloat = 640
 }
 
 struct SettingsView: View {
     @ObservedObject var model = AppModel.shared
-    @State private var page: SettingsPage
-    init(page: SettingsPage = .display) { _page = State(initialValue: page) }
+    @AppStorage("settingsPage") private var page: SettingsPage = .general
 
     var body: some View {
-        NavigationSplitView {
-            List(SettingsPage.allCases, selection: $page) { p in
-                Label { Text(p.title) } icon: { SideIcon(symbol: p.symbol, color: p.color) }
+        TabView(selection: $page) {
+            ForEach(SettingsPage.allCases) { p in
+                SettingsPane(page: p)
+                    .frame(width: SettingsPage.width, height: p.height)
+                    .tabItem { Label(p.title, systemImage: p.symbol) }
                     .tag(p)
             }
-            .navigationSplitViewColumnWidth(200)
-        } detail: {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) { content }
-                    .frame(maxWidth: 620)
-                    .padding(.vertical, 8)
-            }
-            .navigationTitle(page.title)
         }
-        .frame(minWidth: 760, minHeight: 560)
         .id(model.lang)
         .activateOnAppear()
     }
+}
 
-    @ViewBuilder private var content: some View {
+/// 某一页的内容（离屏截图也用它）
+struct SettingsPane: View {
+    var page: SettingsPage
+    var body: some View {
         switch page {
         case .general: GeneralPage()
         case .display: DisplayPage()
@@ -63,7 +62,6 @@ struct SettingsView: View {
         case .quiet: QuietPage()
         case .data: DataPage()
         case .device: DevicePage()
-        case .about: AboutPage()
         }
     }
 }
@@ -142,6 +140,7 @@ struct GeneralPage: View {
                     Button(t("导出…")) { exportSettings() }
                     Button(t("导入…")) { importSettings() }
                 }
+                LabeledContent(t("日志")) { Button(t("在访达中显示")) { NSWorkspace.shared.activateFileViewerSelecting([Paths.log]) } }
             }
         }.formStyle(.grouped)
     }
@@ -176,6 +175,15 @@ struct DisplayPage: View {
                 LabeledContent {
                     HomeStylePicker()
                 } label: { Text(t("首页样式")); Text(t("平时机器人屏幕上的样子")) }
+                LabeledContent {
+                    PageStylePicker(state: "list", key: "list", styles: PageStylePicker.list, selection: $model.settings.listStyle)
+                } label: { Text(t("全部额度页")); Text(t("在首页点一下看全部额度")) }
+                LabeledContent {
+                    PageStylePicker(state: "detail", key: "detail", styles: PageStylePicker.detail, selection: $model.settings.detailStyle)
+                } label: { Text(t("明细页")); Text(t("点进某一家时")) }
+                LabeledContent {
+                    PageStylePicker(state: "approval", key: "alert", styles: PageStylePicker.alert, selection: $model.settings.alertStyle)
+                } label: { Text(t("提醒画面")); Text(t("AI 等你时整屏显示几秒")) }
             }
             Section {
                 LabeledContent(t("配色")) {
@@ -195,17 +203,21 @@ struct DisplayPage: View {
                 SliderRow(title: t("亮度"), note: t("勿扰时段另有设置"), value: $model.settings.brightness, range: 5...100)
             }
             Section {
+                // 跟着首页样式变：A 三格、B 两只眼睛、C 气泡三行、D 不放
                 let subs = model.subs.filter { !$0.hidden }
-                Picker(t("第 1 格"), selection: pinBinding(0)) { ForEach(subs) { Text($0.name).tag($0.id) } }
-                Picker(t("第 2 格"), selection: pinBinding(1)) { ForEach(subs) { Text($0.name).tag($0.id) } }
-                Picker(t("第 3 格"), selection: thirdBinding) {
-                    Text(t("自动：最紧张的一家")).tag("__auto")
-                    ForEach(subs) { Text($0.name).tag($0.id) }
+                let slots = Self.slotNames(model.settings.homeStyle)
+                if slots.count > 0 { Picker(t(slots[0]), selection: pinBinding(0)) { ForEach(subs) { Text($0.name).tag($0.id) } } }
+                if slots.count > 1 { Picker(t(slots[1]), selection: pinBinding(1)) { ForEach(subs) { Text($0.name).tag($0.id) } } }
+                if slots.count > 2 {
+                    Picker(t(slots[2]), selection: thirdBinding) {
+                        Text(t("自动：最紧张的一家")).tag("__auto")
+                        ForEach(subs) { Text($0.name).tag($0.id) }
+                    }
                 }
                 Picker(t("数字表示"), selection: $model.settings.showUsed) {
                     Text(t("还剩多少")).tag(false); Text(t("用了多少")).tag(true)
                 }.pickerStyle(.segmented)
-            } header: { Text(t("内容")) } footer: { Text(t("首页上常驻显示的几家：B 只用第 1、2 格，D 平时不显示数字。点机器人的屏幕可以看全部。")) }
+            } header: { Text(t("内容")) } footer: { Text(t(Self.slotNote(model.settings.homeStyle)) + t("点机器人的屏幕可以看全部。")) }
             Section {
                 ForEach(model.subs.filter { !$0.hidden }) { sub in
                     if sub.windows.count > 1 {
@@ -227,7 +239,27 @@ struct DisplayPage: View {
                     Text(t("从不")).tag(0); Text(t("10 分钟")).tag(10); Text(t("30 分钟")).tag(30); Text(t("1 小时")).tag(60)
                 }
             } footer: { Text(t("有提醒时会自动亮起来")) }
-        }.formStyle(.grouped)
+        }
+        .formStyle(.grouped)
+        .animation(.default, value: model.settings.homeStyle)
+    }
+
+    /// 首页样式 → 「内容」里有哪几格、各叫什么
+    static func slotNames(_ home: String) -> [String] {
+        switch home {
+        case "A": return ["第 1 格", "第 2 格", "第 3 格"]
+        case "C": return ["第 1 行", "第 2 行", "第 3 行"]
+        case "D": return []
+        default: return ["左眼", "右眼"]
+        }
+    }
+    static func slotNote(_ home: String) -> String {
+        switch home {
+        case "A": return "首页底栏常驻显示这三家。"
+        case "C": return "对话气泡里常驻显示这三家。"
+        case "D": return "只有脸：平时不显示数字，哪家快用完才在底部露出那一家。"
+        default: return "两只眼睛分别显示这两家，其他家只在快用完时以红色小胶囊出现。"
+        }
     }
 
     private func windowBinding(_ id: String) -> Binding<String> {
@@ -305,23 +337,17 @@ struct FacePage: View {
 // ---------- 提醒 ----------
 struct AlertsPage: View {
     @ObservedObject var model = AppModel.shared
-    @State private var howTo: String?
     var body: some View {
         Form {
             Section {
                 ForEach(KNOWN_AGENTS, id: \.self) { a in
-                    let st = AgentHooks.status(a)
                     LabeledContent {
                         HStack(spacing: 10) {
-                            HStack(spacing: 5) {
-                                Circle().fill(st == .connected ? Color.green : st == .partial ? Color.orange : Color.gray).frame(width: 7, height: 7)
-                                Text(st == .connected ? t("已接通") : st == .partial ? t("还差一步") : t("未接通")).font(.caption).foregroundStyle(.secondary)
-                            }
-                            if st != .connected { Button(t("怎么接通")) { howTo = a }.controlSize(.small) }
+                            AgentConnectControl(agent: a)
                             Toggle("", isOn: Binding(get: { !model.settings.disabledAgents.contains(a) }, set: { on in
                                 model.settings.disabledAgents.removeAll { $0 == a }
                                 if !on { model.settings.disabledAgents.append(a) }
-                            })).labelsHidden()
+                            })).toggleStyle(.switch).controlSize(.mini).labelsHidden()
                         }
                     } label: {
                         Text(a)
@@ -341,13 +367,15 @@ struct AlertsPage: View {
                 Text([t("轻：只变脸、亮灯"), t("中：点一下头、响一声"), t("强：还没回去，每 5 分钟再闪一次、点头、响一声")][model.settings.alertLevel])
                     .font(.caption).foregroundStyle(.secondary)
                 Picker(selection: $model.settings.alertSecs) {
-                    Text(t("5 秒")).tag(5); Text(t("30 秒")).tag(30); Text(t("一直到我回去")).tag(0)
-                } label: { Text(t("提醒画面停多久")); Text(t("停完回到平时的脸，彩灯和右上角的小 logo 留到你回去")) }
+                    Text(t("5 秒")).tag(5); Text(t("10 秒")).tag(10); Text(t("30 秒")).tag(30); Text(t("一直到我回去")).tag(0)
+                } label: { Text(t("提醒画面停多久")); Text(t("停完回到首页；要你批准、有问题、出错时，彩灯和右上角的小 logo 留到你回去")) }
                 Picker(t("没回去时再提醒"), selection: $model.settings.remind) {
                     Text(t("不再提醒")).tag(0); Text(t("5 分钟后")).tag(5); Text(t("10 分钟后")).tag(10); Text(t("30 分钟后")).tag(30)
                 }
-                Picker(selection: $model.settings.doneTTL) {
-                    Text(t("5 分钟")).tag(5); Text(t("10 分钟")).tag(10); Text(t("30 分钟")).tag(30); Text(t("等我回去")).tag(0)
+                Picker(selection: Binding(get: { model.settings.doneFlash ? -1 : model.settings.doneTTL }, set: { v in
+                    if v < 0 { model.settings.doneFlash = true } else { model.settings.doneFlash = false; model.settings.doneTTL = v }
+                })) {
+                    Text(t("提醒完就熄")).tag(-1); Text(t("5 分钟")).tag(5); Text(t("10 分钟")).tag(10); Text(t("30 分钟")).tag(30); Text(t("等我回去")).tag(0)
                 } label: { Text(t("「做完了」多久后熄灯")); Text(t("AI 已经做完，不是在等你批准")) }
                 Picker(t("「要你批准」最多等多久"), selection: $model.settings.waitingTTL) {
                     Text(t("30 分钟")).tag(30); Text(t("1 小时")).tag(60); Text(t("2 小时")).tag(120); Text(t("直到处理")).tag(0)
@@ -362,12 +390,8 @@ struct AlertsPage: View {
             }
         }
         .formStyle(.grouped)
-        .sheet(item: Binding(get: { howTo.map { IdentStr(id: $0) } }, set: { howTo = $0?.id })) { a in
-            AgentHowTo(agent: a.id) { howTo = nil }
-        }
     }
 }
-struct IdentStr: Identifiable { var id: String }
 
 // ---------- 动作与声音 ----------
 struct MotionPage: View {
@@ -379,7 +403,7 @@ struct MotionPage: View {
                 Picker(t("点头幅度"), selection: $model.settings.nod) { Text(t("小")).tag(0); Text(t("中")).tag(1); Text(t("大")).tag(2) }.pickerStyle(.segmented)
                 SliderRow(title: t("平时抬头角度"), value: $model.settings.pitch, range: 5...40, unit: "°")
                 Toggle(isOn: $model.settings.wander) { Text(t("没事时偶尔转转头")); Text(t("像在看你")) }
-                LabeledContent("") { Button(t("让它动一下")) { model.send("nod") } }
+                LabeledContent(t("试一下")) { Button(t("让它动一下")) { model.send("nod") } }
             }
             Section(t("声音")) {
                 Toggle(t("提示音"), isOn: $model.settings.sound)
@@ -404,7 +428,7 @@ struct MotionPage: View {
             Section(t("头顶触摸")) {
                 Picker(selection: $model.settings.touch) {
                     Text(t("开心一下")).tag(0); Text(t("切换页面")).tag(1); Text(t("什么都不做")).tag(2)
-                } label: { Text(t("平时摸头")); Text(t("提醒画面亮着时摸头，总是提前收起")) }
+                } label: { Text(t("平时摸头")); Text(t("有 AI 在等你（灯亮着）时摸头：提醒收起，灯和右上角的小 logo 一起熄掉") + t("。在全部额度页、明细页摸头 = 返回")) }
             }
         }.formStyle(.grouped)
     }
@@ -460,10 +484,11 @@ struct DataPage: View {
             Section {
                 LabeledContent(t("数据来源")) {
                     HStack(spacing: 5) {
-                        Circle().fill(Engine.codexbarPath() == nil ? Color.red : model.cliError.isEmpty ? Color.green : Color.orange).frame(width: 7, height: 7)
-                        Text(Engine.codexbarPath() == nil ? t("找不到 CodexBar 命令行") : t("CodexBar 命令行") + (model.lastData.map { " · " + t("%@ 更新", DateFormatter.cached("HH:mm").string(from: $0)) } ?? ""))
-                            .foregroundStyle(.secondary)
+                        Circle().fill(model.cliBusy ? Color.gray : Engine.codexbarPath() == nil ? Color.red : model.cliError.isEmpty ? Color.green : Color.orange).frame(width: 7, height: 7)
+                        Text(CodexBarCLI.describe() + (model.lastData.map { " · " + t("%@ 更新", DateFormatter.cached("HH:mm").string(from: $0)) } ?? ""))
+                            .foregroundStyle(.secondary).lineLimit(2)
                     }
+                    Button(t("立即刷新")) { model.refreshNow() }
                 }
                 Picker(t("多久读一次"), selection: $model.settings.cliInterval) {
                     Text(t("2 分钟")).tag(120); Text(t("5 分钟")).tag(300); Text(t("10 分钟")).tag(600)
@@ -471,13 +496,11 @@ struct DataPage: View {
                 Picker(selection: $model.settings.staleMinutes) {
                     Text(t("10 分钟")).tag(10); Text(t("20 分钟")).tag(20); Text(t("1 小时")).tag(60)
                 } label: { Text(t("超过多久没更新算「过期」")); Text(t("过期的数字会变灰")) }
-                LabeledContent("") { Button(t("立即刷新")) { model.refreshNow() } }
             }
             Section {
                 List {
                     ForEach(model.subs) { s in
                         HStack(spacing: 10) {
-                            Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
                             BrandBadge(id: s.id, mono: s.mono, hue: s.hue)
                             Text(s.name).frame(minWidth: 110, alignment: .leading)
                             Spacer()
@@ -489,15 +512,19 @@ struct DataPage: View {
                                 Button(t("选择图片…")) { pickIcon(s.id) }
                                 Button(t("用字母")) { IconStore.remove(s.id); model.refresh(); model.objectWillChange.send() }
                                 Divider()
-                                ForEach(["#e08a63", "#7c9cff", "#cfd4dc", "#5fd3bc", "#b28cff", "#8ab4ff", "#9be29b", "#ffd27a", "#ff8fb1"], id: \.self) { c in
-                                    Button { model.settings.subHue[s.id] = c } label: { Text(t("字母颜色") + " " + c) }
+                                Section(t("字母颜色")) {
+                                    ForEach(Self.letterColors, id: \.0) { c in
+                                        Button { model.settings.subHue[s.id] = c.0 } label: {
+                                            Label { Text(t(c.1)) } icon: { Image(nsImage: swatchImage(c.0)) }
+                                        }
+                                    }
                                 }
-                            } label: { Circle().fill(Color(hex: s.hue)).frame(width: 16, height: 16) }
+                            } label: { Image(nsImage: swatchImage(s.hue, size: 14)) }
                                 .menuStyle(.borderlessButton).frame(width: 34)
                             Toggle("", isOn: Binding(get: { !model.settings.subHidden.contains(s.id) }, set: { on in
                                 model.settings.subHidden.removeAll { $0 == s.id }
                                 if !on { model.settings.subHidden.append(s.id) }
-                            })).labelsHidden()
+                            })).toggleStyle(.switch).controlSize(.mini).labelsHidden()
                         }
                     }
                     .onMove { from, to in
@@ -539,6 +566,21 @@ struct DataPage: View {
 }
 
 extension DataPage {
+    static let letterColors: [(String, String)] = [
+        ("#e08a63", "陶土"), ("#7c9cff", "蓝"), ("#cfd4dc", "银"), ("#5fd3bc", "青绿"), ("#b28cff", "紫"),
+        ("#8ab4ff", "天蓝"), ("#9be29b", "绿"), ("#ffd27a", "琥珀"), ("#ff8fb1", "粉"),
+    ]
+    /// 菜单里的小色块（不当模板图，保留颜色）
+    func swatchImage(_ hex: String, size: CGFloat = 12) -> NSImage {
+        let img = NSImage(size: NSSize(width: size, height: size), flipped: false) { r in
+            NSColor(Color(hex: hex)).setFill()
+            NSBezierPath(ovalIn: r.insetBy(dx: 0.5, dy: 0.5)).fill()
+            return true
+        }
+        img.isTemplate = false
+        return img
+    }
+
     func pickIcon(_ id: String) {
         let p = NSOpenPanel()
         p.allowedContentTypes = [.png, .svg, .jpeg]
@@ -579,6 +621,7 @@ struct DevicePage: View {
                     Button(t("更改…")) { openWindow(id: "wizard") }
                 } label: { Text("WiFi"); Text(t("改 WiFi 要插上 USB 线")) }
                 LabeledContent(t("地址"), value: model.device?.ip ?? "—")
+                LabeledContent(t("电量"), value: model.deviceOnline ? (model.device?.batteryLong ?? "—") : "—")
                 LabeledContent {
                     Text("••••••••").foregroundStyle(.secondary)
                     Button(t("重新生成")) { confirmToken = true }
@@ -611,26 +654,4 @@ struct DevicePage: View {
         } message: { Text(t("备份在小管家的「备份」文件夹里。插上 USB 线后，在安装向导的「连接机器人」一步选择「恢复出厂固件」。")) }
     }
     private func signal(_ rssi: Int) -> String { rssi == 0 ? "—" : rssi > -60 ? t("强") : rssi > -75 ? t("中") : t("弱") }
-}
-
-// ---------- 关于 ----------
-struct AboutPage: View {
-    var body: some View {
-        Form {
-            Section {
-                HStack(spacing: 16) {
-                    RobotScreen(state: "calm", width: 84)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(t("小管家")).font(.title3.bold())
-                        Text(t("版本 %@ · 开源（MIT）", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.0")).foregroundStyle(.secondary)
-                        Link("github.com/rayraid/stackchan-ai-quota", destination: URL(string: "https://github.com/rayraid/stackchan-ai-quota")!)
-                    }
-                }
-            }
-            Section {
-                LabeledContent(t("致谢")) { Text("CodexBar · peon-ping · M5Stack · Noto Sans · Inter").font(.caption).foregroundStyle(.secondary) }
-                LabeledContent(t("日志")) { Button(t("在访达中显示")) { NSWorkspace.shared.activateFileViewerSelecting([Paths.log]) } }
-            }
-        }.formStyle(.grouped)
-    }
 }

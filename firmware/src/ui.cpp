@@ -239,10 +239,42 @@ static void numPct(const Val& q, int x, int cy, const lgfx::IFont* nf, const The
   txt(num, x0, cy, nf, q.num, textdatum_t::middle_left);
   if (q.val >= 0) txt("%", x0 + nw + 2, cy + 4, F14, T.dim, textdatum_t::middle_left);
 }
-// 左上角：时钟，或者数据过期时写「数据停在 HH:MM」
-static void topLeft(const State& s, const Cfg& c, const Theme& T, bool grey) {
-  if (grey) txt(trf(S_STALE_S, s.dataTime.length() ? s.dataTime.c_str() : tr(S_LONG_AGO)), 12, 10, F14, T.dim);
-  else if (c.clock && s.time.length()) txt(s.time, 12, 10, N18, T.dim);
+// 电量（只在首页左上角）：小电池 + 百分比。插着线变绿、电池里有闪电；没插线剩 20% 以下变红
+static int gUiBatt = -1;
+static bool gUiPower = false;
+static void battery(int x, int cy, const Theme& T, const Lv& L) {
+  if (gUiBatt < 0) return;
+  bool low = !gUiPower && gUiBatt <= 20;
+  uint32_t line = low ? L.low : T.dim, bg = bgAt(T, cy);
+  uint32_t fill = low ? L.low : gUiPower ? L.ok : T.fg;
+  const int w = 22, h = 12, y = cy - h / 2;
+  rrect(x, y, w, h, 3.5f, line);
+  rrect(x + 1.6f, y + 1.6f, w - 3.2f, h - 3.2f, 2, bg);
+  rrect(x + w + .6f, cy - 2.5f, 2.4f, 5, 1.2f, line);
+  rrect(x + 2.8f, y + 2.8f, std::max(2.2f, (w - 5.6f) * gUiBatt / 100.0f), h - 5.6f, 1.4f, fill);
+  if (gUiPower) {                        // 闪电：先用底色描一圈边，再画实心
+    float bx = x + w / 2.0f;
+    auto bolt = [&](float k, uint32_t col) {
+      cv.fillTriangle(lroundf(bx + 2 * k), lroundf(cy - 6.2f * k), lroundf(bx - 3.6f * k), lroundf(cy + 1 * k), lroundf(bx + .6f * k), lroundf(cy + 1 * k), c565(col));
+      cv.fillTriangle(lroundf(bx - 2 * k), lroundf(cy + 6.2f * k), lroundf(bx + 3.6f * k), lroundf(cy - 1 * k), lroundf(bx - .6f * k), lroundf(cy - 1 * k), c565(col));
+    };
+    bolt(1.3f, bg);
+    bolt(1.0f, T.fg);
+  }
+  txt(String(gUiBatt) + "%", x + w + 8, cy + 1, N15B, low ? L.low : gUiPower ? L.ok : T.dim, textdatum_t::middle_left);
+}
+// 左上角：时钟，或者数据过期时写「数据停在 HH:MM」；后面跟着电量
+static void topLeft(const State& s, const Cfg& c, const Theme& T, const Lv& L, bool grey) {
+  int x = 12;
+  if (grey) {
+    String t = trf(S_STALE_S, s.dataTime.length() ? s.dataTime.c_str() : tr(S_LONG_AGO));
+    txt(t, 12, 10, F14, T.dim);
+    x += tw(t, F14) + 10;
+  } else if (c.clock && s.time.length()) {
+    txt(s.time, 12, 10, N18, T.dim);
+    x += tw(s.time, N18) + 10;
+  }
+  battery(x, 19, T, L);
 }
 // 整屏提醒收起后：一个小圆章，里面是在等你的那家 AI 的 logo（没有图标就写字母）
 static void waitMark(const State& s, const Theme& T, int x, int y) {
@@ -379,7 +411,7 @@ static void pageHome(const State& s, const Cfg& c, const Theme& T, const Lv& L, 
   else if (c.home == "C") homeC(s, c, T, L, t, grey, e);
   else if (c.home == "D") homeD(s, c, T, L, t, grey, e);
   else homeB(s, c, T, L, t, grey, e);
-  topLeft(s, c, T, grey);
+  topLeft(s, c, T, L, grey);
   if (c.home == "C") waitMark(s, T, 74, 66); else waitMark(s, T, 293, 27);
 }
 
@@ -419,11 +451,7 @@ static void pageLow(const State& s, const Cfg& c, const Theme& T, uint32_t t, co
   txt(fit(l.name + " · " + (l.reset.length() ? l.reset : l.label), 230, F16), 72, 46, F16, mix(cb, cf, .8f));
 }
 // 有 AI 在等你：整屏变色
-static void pageAsk(const State& s, const Cfg& c, const UiCtx& u) {
-  uint32_t t = millis();
-  const Wait* w = nullptr;
-  for (auto& x : s.waiting) if (x.id == u.flashId) w = &x;
-  if (!w) return;
+static void askClassic(const Wait* w, const Cfg& c, const UiCtx& u, uint32_t t) {
   const String& k = w->kind;
   bool green = k == "done" || k == "restored";
   uint32_t bgc = green ? 0x3ddc84 : k == "error" ? 0xff7a6b : 0xffb020;
@@ -452,6 +480,73 @@ static void pageAsk(const State& s, const Cfg& c, const UiCtx& u) {
     rrect(100, 218, 120, 5, 2.5f, mix(bgc, fg, .18f));
     if (u.flashLeft > 0) rrect(100, 218, std::max(5.0f, 120 * u.flashLeft), 5, 2.5f, mix(bgc, fg, .55f));
   }
+}
+// 提醒画面 B（柔和变色）、C（脸 + 底部卡片）用的颜色：有问题问你改成蓝色，和要你批准分开
+struct AskCol { uint32_t bg, fg; };
+static AskCol askCol(const String& k) {
+  if (k == "done" || k == "restored") return {0x3ddc84, 0x04210f};
+  if (k == "error") return {0xff7a6b, 0x2a0606};
+  if (k == "question") return {0x5ab8ff, 0x04192b};
+  return {0xffb020, 0x1b1300};
+}
+static Expr askExpr(const String& k) { return k == "done" || k == "restored" ? E_HAPPY : k == "error" ? E_WORRY : E_ALERT; }
+static String askTitle(const String& k) {
+  return tr(k == "approval" ? S_APPROVAL : k == "question" ? S_QUESTION : k == "done" ? S_DONE : k == "error" ? S_ERROR : k == "restored" ? S_RESTORED : S_NOTE);
+}
+// 白色小圆点里画 ! ? ✓
+static void askMark(const String& k, int x, int y, int r, uint32_t fg) {
+  cv.fillSmoothCircle(x, y, r, c565(0xffffff));
+  if (k == "done" || k == "restored") { wline(x - r * .45f, y, x - r * .1f, y + r * .38f, 1.2f, fg); wline(x - r * .1f, y + r * .38f, x + r * .5f, y - r * .38f, 1.2f, fg); }
+  else txt(k == "question" ? "?" : "!", x, y + 1, N15B, fg, textdatum_t::middle_center);
+}
+// logo 放在深色圆里；没有图标就写字母
+static void askLogo(const Wait* w, int cx, int cy, int r, int size, uint32_t fg, uint32_t bg) {
+  cv.fillSmoothCircle(cx, cy, r, c565(fg));
+  if (!icon(w->iconId, w->iconV, size, cx - size / 2, cy - size / 2, true))
+    txt(w->mono.length() ? w->mono : w->agent.substring(0, 2), cx, cy + 1, N15B, bg, textdatum_t::middle_center);
+}
+static void askB(const Wait* w, const Cfg& c, const UiCtx& u, uint32_t t) {
+  const String& k = w->kind;
+  AskCol a = askCol(k);
+  for (int y = 0; y < 240; y++) cv.drawFastHLine(0, y, 320, c565(mix(a.bg, 0x000000, .28f * y / 239)));
+  askLogo(w, 28, 26, 16, 20, a.fg, a.bg);
+  txt(fit(w->agent, 220, F16), 52, 26, F16, a.fg, textdatum_t::middle_left);
+  askMark(k, 296, 26, 12, a.fg);
+  eyes(askExpr(k), 160, 86, 92, a.fg, 0, mix(a.bg, 0x000000, .28f * 86 / 239), c, t, false, 1, .82f);
+  txt(fit(askTitle(k), 300, F38B), 160, 148, F38B, a.fg, textdatum_t::middle_center);
+  uint32_t low = mix(a.bg, 0x000000, .28f);
+  txt(fit(k == "note" ? w->text : w->project, 300, F16), 160, 190, F16, mix(mix(a.bg, 0x000000, .28f * 190 / 239), a.fg, .85f), textdatum_t::middle_center);
+  if (u.reminder) txt(trf(S_WAITED, (unsigned)(u.waited / 60), (unsigned)(u.waited % 60)), 160, 214, F14, mix(low, a.fg, .62f), textdatum_t::middle_center);
+  if (u.flashLeft >= 0) {
+    cv.fillRect(0, 234, 320, 6, c565(mix(low, a.fg, .16f)));
+    if (u.flashLeft > 0) cv.fillRect(0, 234, std::max(6, (int)lroundf(320 * u.flashLeft)), 6, c565(mix(low, a.fg, .6f)));
+  }
+}
+static void askC(const Wait* w, const Cfg& c, const UiCtx& u, uint32_t t) {
+  const String& k = w->kind;
+  AskCol a = askCol(k);
+  const Theme& T = themeOf(c.theme);
+  bgFill(T);
+  eyes(askExpr(k), 160, 60, 100, eyeColor(c, T), T.light ? 0 : T.glow, bgAt(T, 60), c, t, false, 1, .86f);
+  if (u.reminder) txt(trf(S_WAITED, (unsigned)(u.waited / 60), (unsigned)(u.waited % 60)), 160, 104, F14, T.dim, textdatum_t::middle_center);
+  rrect(10, 116, 300, 114, 20, a.bg);
+  askLogo(w, 48, 168, 27, 32, a.fg, a.bg);
+  askMark(k, 70, 190, 10, a.fg);
+  txt(fit(askTitle(k), 210, F26B), 90, 152, F26B, a.fg, textdatum_t::middle_left);
+  txt(fit(w->agent + " · " + (k == "note" ? w->text : w->project), 210, F14), 90, 184, F14, mix(a.bg, a.fg, .78f), textdatum_t::middle_left);
+  if (u.flashLeft >= 0) {
+    rrect(24, 212, 272, 4, 2, mix(a.bg, a.fg, .18f));
+    if (u.flashLeft > 0) rrect(24, 212, std::max(4.0f, 272 * u.flashLeft), 4, 2, mix(a.bg, a.fg, .55f));
+  }
+}
+static void pageAsk(const State& s, const Cfg& c, const UiCtx& u) {
+  uint32_t t = millis();
+  const Wait* w = nullptr;
+  for (auto& x : s.waiting) if (x.id == u.flashId) w = &x;
+  if (!w) return;
+  if (c.alertStyle == "B") askB(w, c, u, t);
+  else if (c.alertStyle == "C") askC(w, c, u, t);
+  else askClassic(w, c, u, t);
 }
 // 暗下来的画面：连不上、休息、连 WiFi、没配对
 static void pageDark(const Cfg& c, const String& title, const String& sub, const String& sub2, uint32_t t, bool sleepy) {
@@ -487,88 +582,209 @@ static void pageOta(int p) {
   txt(trf(S_KEEP_POWER, std::max(0, p)), 160, 146, F16, 0x8b95a3, textdatum_t::top_center);
 }
 
-// ---------- 明细列表、单个订阅 ----------
+// ---------- 全部额度页（A 两列小卡片 / B 一行一家 / C 竖条对比）、明细页（A 大圆环 + 旁边几行 / B 统一横条） ----------
+// 位置和 mac/Resources/preview.html 里的 LIST / DETAIL 一致（Mac 设置里的预览用它）。
 static const int LIST_TOP = 40;
 static int listRows(const State& s) { return std::min((int)s.subs.size(), 6); }
-int uiListHit(const State& s, int y) {
-  int n = listRows(s);
-  if (!n || y < LIST_TOP) return -1;
-  int i = (y - LIST_TOP) / (200 / n);
-  return i < n ? i : -1;
+// 数字 + 小号的 %：align 0 = 从 x 往右，1 = 以 x 居中，2 = 到 x 为止
+static void numPctAt(int val, int x, int cy, const lgfx::IFont* nf, uint32_t col, const Theme& T, int align) {
+  String num = val < 0 ? String("--") : String(val);
+  int nw = tw(num, nf), pw = val < 0 ? 0 : tw("%", F14) + 2, w = nw + pw;
+  int x0 = align == 2 ? x - w : align == 1 ? x - w / 2 : x;
+  txt(num, x0, cy, nf, col, textdatum_t::middle_left);
+  if (val >= 0) txt("%", x0 + nw + 2, cy + (nf == N28B ? 5 : nf == N22B ? 4 : 3), F14, T.dim, textdatum_t::middle_left);
 }
-static void pageList(const State& s, const Cfg& c, const Theme& T, const Lv& L) {
-  bgFill(T);
-  txt(tr(c.used ? S_ALL_USED : S_ALL), 12, 8, F18B, T.fg);
+static void hbar(float x, float y, float w, float h, int val, uint32_t col, const Theme& T) {
+  rrect(x, y, w, h, h / 2, T.track);
+  if (val > 0) rrect(x, y, std::max(h, w * std::min(100, val) / 100.0f), h, h / 2, col);
+}
+static void chevron(int x, int cy, uint32_t col) { wline(x + 5, cy - 6, x, cy, 1.1f, col); wline(x, cy, x + 5, cy + 6, 1.1f, col); }
+static bool isAscii(const String& s) { for (size_t i = 0; i < s.length(); i++) if ((uint8_t)s[i] >= 0x80) return false; return true; }
+struct Cell { bool na; int val; uint32_t col, num; };
+static Cell cellOf(const State& s, const Cfg& c, const Sub& b, const Theme& T, const Lv& L) {
+  Cell k;
+  k.na = !s.ok || b.left < 0 || b.stale;
+  k.val = b.left < 0 ? -1 : (c.used ? 100 - b.left : b.left);
+  k.col = k.na ? L.na : lvc(L, b.level);
+  k.num = k.na ? T.dim : (b.level == "ok" ? T.fg : k.col);
+  return k;
+}
+// 顶部：‹ 全部额度（摸头或点这里回首页），右边同步时间
+static void listHeader(const State& s, const Cfg& c, const Theme& T, const Lv& L) {
+  chevron(12, 19, T.dim);
+  txt(tr(c.used ? S_ALL_USED : S_ALL), 24, 8, F18B, T.fg);
   if (s.ok) {
     String t = trf(S_SYNCED, s.time.c_str());
     int w = tw(t, F14);
-    cv.fillSmoothCircle(308 - w - 9, 20, 3, c565(lvc(T.light ? LV_LIGHT : LV_DARK, "ok")));
+    cv.fillSmoothCircle(308 - w - 9, 20, 3, c565(L.ok));
     txt(t, 308, 20, F14, T.dim, textdatum_t::middle_right);
   } else txt(trf(S_STALE_S, s.dataTime.c_str()), 308, 20, F14, T.dim, textdatum_t::middle_right);
-  int n = listRows(s), h = n ? 200 / n : 200;
+}
+struct Tile { int x, y, w, h; };
+static Tile tileA(int n, int i) {
+  int rows = (n + 1) / 2, gap = 8, h = rows ? (196 - (rows - 1) * gap) / rows : 196;
+  bool wide = n % 2 == 1 && i == n - 1;
+  return {wide ? 8 : (i % 2 ? 164 : 8), LIST_TOP + (i / 2) * (h + gap), wide ? 304 : 148, h};
+}
+static String subLabel(const Sub& b) { return b.left < 0 ? (b.error.length() ? b.error : String(tr(S_CANT_READ))) : b.label; }
+static void listA(const State& s, const Cfg& c, const Theme& T, const Lv& L) {
+  int n = listRows(s);
   for (int i = 0; i < n; i++) {
     const Sub& b = s.subs[i];
-    int y = LIST_TOP + i * h, cy = y + h / 2;
-    bool na = !s.ok || b.left < 0 || b.stale;
-    uint32_t col = na ? L.na : lvc(L, b.level);
-    int val = b.left < 0 ? -1 : (c.used ? 100 - b.left : b.left);
-    cv.drawFastHLine(12, y, 296, c565(mix(bgAt(T, y), T.dim, .22f)));
-    badge(b, 11, cy - 14, 28, !T.light);
-    txt(fit(b.name, 120, F16), 48, cy - 19, F16, T.fg);
-    txt(fit(b.left < 0 ? (b.error.length() ? b.error : String(tr(S_CANT_READ))) : b.label, 122, F14), 48, cy + 1, F14, T.dim);
-    rrect(176, cy - 3, 58, 6, 3, T.track);
-    if (val > 0) rrect(176, cy - 3, std::max(6, 58 * val / 100), 6, 3, col);
-    txt(val < 0 ? String("--") : String(val) + "%", 308, cy + 1, N22B, na ? T.dim : (b.level == "ok" ? T.fg : col), textdatum_t::middle_right);
+    Tile t = tileA(n, i);
+    Cell k = cellOf(s, c, b, T, L);
+    if (!k.na && b.level == "low") { rrect(t.x, t.y, t.w, t.h, 12, mix(T.panel, L.low, .75f)); rrect(t.x + 1.5f, t.y + 1.5f, t.w - 3, t.h - 3, 10.5f, T.panel); }
+    else rrect(t.x, t.y, t.w, t.h, 12, T.panel);
+    badge(b, t.x + 10, t.y + 5, 20, !T.light);
+    txt(fit(b.name, t.w - 46, F14), t.x + 36, t.y + 15, F14, T.dim, textdatum_t::middle_left);
+    numPctAt(k.val, t.x + 10, t.y + t.h - 19, N28B, k.num, T, 0);
+    txt(fit(b.left < 0 ? subLabel(b) : shortLabel(b.label), 64, F14), t.x + t.w - 10, t.y + t.h - 17, F14, T.dim, textdatum_t::middle_right);
+    hbar(t.x + 10, t.y + t.h - 6, t.w - 20, 3, k.val, k.col, T);
   }
 }
-static void ring(int cx, int cy, int r, int val, uint32_t col, const Theme& T) {
-  cv.fillSmoothCircle(cx, cy, r + 5, c565(T.track));
-  cv.fillSmoothCircle(cx, cy, r - 5, c565(bgAt(T, cy)));
+static void listB(const State& s, const Cfg& c, const Theme& T, const Lv& L) {
+  int n = listRows(s), h = n ? 196 / n : 196;
+  for (int i = 0; i < n; i++) {
+    const Sub& b = s.subs[i];
+    int cy = LIST_TOP + i * h + h / 2 - 4;
+    Cell k = cellOf(s, c, b, T, L);
+    badge(b, 12, cy - 12, 24, !T.light);
+    String nm = fit(b.name, 120, F16);
+    int nw = tw(nm, F16);
+    txt(nm, 48, cy - 3, F16, T.fg, textdatum_t::middle_left);
+    txt(fit(subLabel(b), 150 - nw, F14), 48 + nw + 8, cy - 2, F14, T.dim, textdatum_t::middle_left);
+    numPctAt(k.val, 308, cy - 3, N22B, k.num, T, 2);
+    hbar(48, cy + 12, 260, 4, k.val, k.col, T);
+  }
+}
+static void listC(const State& s, const Cfg& c, const Theme& T, const Lv& L) {
+  int n = listRows(s);
+  float cw = n ? 304.0f / n : 304;
+  for (int i = 0; i < n; i++) {
+    const Sub& b = s.subs[i];
+    int cx = lroundf(8 + cw * i + cw / 2), bw = std::min(34, (int)cw - 22), top = 72, bh = 104;
+    Cell k = cellOf(s, c, b, T, L);
+    numPctAt(k.val, cx, 56, N22B, k.num, T, 1);
+    rrect(cx - bw / 2.0f, top, bw, bh, 10, T.panel);
+    if (k.val > 0) { float fh = std::max(10.0f, bh * std::min(100, k.val) / 100.0f); rrect(cx - bw / 2.0f, top + bh - fh, bw, fh, 10, k.col); }
+    badge(b, cx - 12, 186, 24, !T.light);
+    txt(fit(shortLabel(subLabel(b)), (int)cw - 4, F14), cx, 222, F14, T.dim, textdatum_t::middle_center);
+  }
+}
+static void pageList(const State& s, const Cfg& c, const Theme& T, const Lv& L) {
+  bgFill(T);
+  listHeader(s, c, T, L);
+  if (c.list == "B") listB(s, c, T, L);
+  else if (c.list == "C") listC(s, c, T, L);
+  else listA(s, c, T, L);
+}
+int uiListHit(const State& s, const Cfg& c, int x, int y) {
+  int n = listRows(s);
+  if (y < LIST_TOP) return -2;
+  if (!n) return -1;
+  if (c.list == "B") { int i = (y - LIST_TOP) / (196 / n); return i < n ? i : -1; }
+  if (c.list == "C") { int i = (int)((x - 8) / (304.0f / n)); return i >= 0 && i < n ? i : -1; }
+  for (int i = 0; i < n; i++) { Tile t = tileA(n, i); if (x >= t.x - 4 && x < t.x + t.w + 4 && y >= t.y - 4 && y < t.y + t.h + 4) return i; }
+  return -1;
+}
+
+// 圆环：半径 r，线宽 2*half
+static void ring(int cx, int cy, int r, int half, int val, uint32_t col, const Theme& T) {
+  cv.fillSmoothCircle(cx, cy, r + half, c565(T.track));
+  cv.fillSmoothCircle(cx, cy, r - half, c565(bgAt(T, cy)));
   if (val <= 0) return;
-  const int N = std::max(2, 72 * val / 100);
+  const int N = std::max(2, 72 * std::min(100, val) / 100);
   float px = 0, py = 0;
   for (int i = 0; i <= N; i++) {
-    float a = -PI / 2 + 2 * PI * (val / 100.0f) * i / N;
+    float a = -PI / 2 + 2 * PI * (std::min(100, val) / 100.0f) * i / N;
     float qx = cx + r * cosf(a), qy = cy + r * sinf(a);
-    if (i) wline(px, py, qx, qy, 5, col);
+    if (i) wline(px, py, qx, qy, half, col);
     px = qx; py = qy;
+  }
+}
+// 明细页顶部：‹ logo 名字，右边写「还剩 / 已用 / 数据过期了」
+static void detailHeader(const Sub& b, const Cfg& c, const Theme& T) {
+  chevron(12, 24, T.dim);
+  badge(b, 24, 10, 28, !T.light);
+  const lgfx::IFont* nf = isAscii(b.name) ? F18B : F16;     // 粗体标题字只切了常用字，自定义的中文简称用正文字
+  txt(fit(b.name, 170, nf), 60, 24, nf, T.fg, textdatum_t::middle_left);
+  txt(tr(b.stale ? S_STALE_DATA : (c.used ? S_USED : S_LEFT)), 308, 24, F14, T.dim, textdatum_t::middle_right);
+}
+// 大圆环放周期最短的那个额度；一样短的取剩得少的
+static int heroIndex(const std::vector<Win>& ws, int n) {
+  int h = 0;
+  for (int i = 1; i < n; i++) {
+    int a = ws[i].mins > 0 ? ws[i].mins : INT32_MAX, b = ws[h].mins > 0 ? ws[h].mins : INT32_MAX;
+    if (a < b || (a == b && ws[i].left < ws[h].left)) h = i;
+  }
+  return h;
+}
+static void detailA(const State& s, const Cfg& c, const Sub& b, const Theme& T, const Lv& L, int n, bool na) {
+  int hi = heroIndex(b.wins, n);
+  const Win& w = b.wins[hi];
+  int val = c.used ? 100 - w.left : w.left;
+  ring(82, 118, 50, 5, val, na ? L.na : lvc(L, w.level), T);
+  numPctAt(val, 82, 119, N28B, T.fg, T, 1);
+  txt(fit(w.label, 150, F16), 82, 190, F16, T.fg, textdatum_t::middle_center);
+  txt(fit(w.reset.length() ? w.reset : String(tr(S_UNUSED)), 150, F14), 82, 212, F14, T.dim, textdatum_t::middle_center);
+  if (n == 1) {                       // 只有一个额度：右边写恢复时间和用量提醒
+    txt(fit(w.reset.length() ? w.reset : String(tr(S_UNUSED)), 140, F16), 168, 96, F16, T.fg, textdatum_t::middle_left);
+    if (w.pace.length()) {
+      int d = -1;
+      for (size_t i = 0; i < w.pace.length(); i++) if (isdigit((uint8_t)w.pace[i])) { d = i; break; }
+      String a = d > 0 ? w.pace.substring(0, d) : w.pace, z = d > 0 ? w.pace.substring(d) : String();
+      a.trim();
+      txt(fit(a, 140, F14), 168, 132, F14, L.mid, textdatum_t::middle_left);
+      if (z.length()) txt(fit(z, 140, F16), 168, 154, F16, L.mid, textdatum_t::middle_left);
+    }
+    return;
+  }
+  int h = std::min(58, 170 / (n - 1)), row = 0;
+  for (int i = 0; i < n; i++) {
+    if (i == hi) continue;
+    const Win& x = b.wins[i];
+    int y = 60 + row++ * h, v = c.used ? 100 - x.left : x.left;
+    uint32_t col = na ? L.na : lvc(L, x.level);
+    txt(fit(x.label, 92, F14), 168, y + 8, F14, T.fg, textdatum_t::middle_left);
+    numPctAt(v, 308, y + 8, N18, na ? T.dim : (x.level == "ok" ? T.fg : col), T, 2);
+    hbar(168, y + 22, 140, 4, v, col, T);
+    if (h >= 48) txt(fit(x.reset, 140, F14), 168, y + 38, F14, T.dim, textdatum_t::middle_left);
+  }
+}
+static void detailB(const State& s, const Cfg& c, const Sub& b, const Theme& T, const Lv& L, int n, bool na) {
+  if (n == 1) {
+    const Win& w = b.wins[0];
+    int val = c.used ? 100 - w.left : w.left;
+    uint32_t col = na ? L.na : lvc(L, w.level);
+    txt(fit(w.label, 150, F16), 12, 80, F16, T.fg, textdatum_t::middle_left);
+    txt(fit(w.reset.length() ? w.reset : String(tr(S_UNUSED)), 160, F14), 12, 104, F14, T.dim, textdatum_t::middle_left);
+    numPctAt(val, 308, 90, N28B, na ? T.dim : (w.level == "ok" ? T.fg : col), T, 2);
+    hbar(12, 126, 296, 10, val, col, T);
+    if (w.pace.length()) txt(fit(w.pace, 296, F14), 12, 160, F14, L.mid, textdatum_t::middle_left);
+    return;
+  }
+  int h = 184 / n;
+  bool big = h >= 56;
+  for (int i = 0; i < n; i++) {
+    const Win& w = b.wins[i];
+    int y = 52 + i * h, val = c.used ? 100 - w.left : w.left;
+    uint32_t col = na ? L.na : lvc(L, w.level);
+    String lab = fit(w.label, 150, F16);
+    int lw = tw(lab, F16);
+    txt(lab, 12, y + 10, F16, T.fg, textdatum_t::middle_left);
+    txt(fit(w.reset, 200 - lw, F14), 12 + lw + 8, y + 11, F14, T.dim, textdatum_t::middle_left);
+    numPctAt(val, 308, y + 10, big ? N28B : N22B, na ? T.dim : (w.level == "ok" ? T.fg : col), T, 2);
+    hbar(12, y + (big ? 32 : 27), 296, big ? 8 : 6, val, col, T);
   }
 }
 static void pageDetail(const State& s, const Cfg& c, const Sub& b, const Theme& T, const Lv& L) {
   bgFill(T);
-  badge(b, 10, 6, 40, !T.light);
-  txt(fit(b.name, 160, F16), 60, 8, F16, T.fg);
-  txt(tr(b.stale ? S_STALE_DATA : (c.used ? S_USED : S_LEFT)), 60, 29, F14, T.dim);
+  detailHeader(b, c, T);
   int n = std::min((int)b.wins.size(), 4);
   if (!n) { txt(b.error.length() ? b.error : String(tr(S_CANT_READ)), 160, 110, F16, T.dim, textdatum_t::top_center); return; }
-  if (n <= 3) {
-    for (int i = 0; i < n; i++) {
-      const Win& w = b.wins[i];
-      int cx = 160 + (int)lroundf((i - (n - 1) / 2.0f) * 104), cy = 112;
-      bool na = !s.ok || b.stale;
-      int val = c.used ? 100 - w.left : w.left;
-      ring(cx, cy, 37, val, na ? L.na : lvc(L, w.level), T);
-      txt(String(val), cx, cy + 1, N28B, T.fg, textdatum_t::middle_center);
-      txt(fit(w.label, 100, F14), cx, 160, F14, T.fg, textdatum_t::top_center);
-      txt(fit(w.reset.length() ? w.reset : String(tr(S_UNUSED)), 100, F14), cx, 182, F14, T.dim, textdatum_t::top_center);
-      if (w.pace.length() && n == 1) txt(fit(w.pace, 296, F14), 160, 206, F14, L.mid, textdatum_t::top_center);
-    }
-    return;
-  }
-  int h = 190 / n;   // 4 个时间段：一行一个，名称和恢复时间在同一行，下面一根条
-  for (int i = 0; i < n; i++) {
-    const Win& w = b.wins[i];
-    int y = 50 + i * h;
-    bool na = !s.ok || b.stale;
-    uint32_t col = na ? L.na : lvc(L, w.level);
-    int val = c.used ? 100 - w.left : w.left;
-    String lab = fit(w.label, 150, F16);
-    txt(lab, 12, y + 2, F16, T.fg);
-    txt(fit(w.reset, 236 - (24 + tw(lab, F16)), F14), 24 + tw(lab, F16), y + 4, F14, T.dim);
-    txt(String(val) + "%", 308, y, N22B, w.level == "ok" ? T.fg : col, textdatum_t::top_right);
-    rrect(12, y + 28, 296, 7, 3, T.track);
-    if (val > 0) rrect(12, y + 28, std::max(7, 296 * val / 100), 7, 3, col);
-  }
+  bool na = !s.ok || b.stale;
+  if (c.detail == "B") detailB(s, c, b, T, L, n, na);
+  else detailA(s, c, b, T, L, n, na);
 }
 
 // ---------- 按情况画 ----------
@@ -578,6 +794,8 @@ void uiRender(const State& s, const Cfg& c, Mode m, const UiCtx& u) {
   useFonts(i18nLang() == L_JA ? FS_JA : FS_ZH);
   const Theme& T = themeOf(c.theme);
   const Lv& L = T.light ? LV_LIGHT : LV_DARK;
+  gUiBatt = u.batt;
+  gUiPower = u.power;
   auto calmPages = [&](bool grey) {
     if (u.page == P_DETAIL) { if (const Sub* b = findSub(s, u.detailId)) { pageDetail(s, c, *b, T, L); return; } }
     if (u.page != P_FACE) { pageList(s, c, T, L); return; }

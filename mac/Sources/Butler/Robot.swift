@@ -200,10 +200,6 @@ final class Flasher: @unchecked Sendable {
 
 // ---------- 这台 Mac 上缺什么 ----------
 enum Env {
-    static var codexbarApp: Bool {
-        FileManager.default.fileExists(atPath: "/Applications/CodexBar.app") ||
-        FileManager.default.fileExists(atPath: NSString(string: "~/Applications/CodexBar.app").expandingTildeInPath)
-    }
     static var codexbarCLI: String? { Engine.codexbarPath() }
 
     static let peonDir = NSString(string: "~/.claude/hooks/peon-ping").expandingTildeInPath

@@ -146,3 +146,68 @@ void bodyUpdate(const State& s, const Cfg& c, Mode m, int flashSeq) {
   }
 }
 uint32_t bodyLastActivity() { return gLastActivity; }
+
+// ---------- 电池 ----------
+// 身体里的 INA226 测电池电压和电流（放电为正、充电为负）。百分比按锂电池的静置电压估算：
+// 先按电流把内阻上的压降补回来，再平滑，显示的数字变化不到 2 个点就不动，免得来回跳。
+static portMUX_TYPE gBattLock = portMUX_INITIALIZER_UNLOCKED;
+static Batt gBatt, gBattSim;
+static bool gBattSimOn = false;
+
+static int battPctOf(float v) {
+  static const float V[] = {3.40f, 3.60f, 3.68f, 3.73f, 3.77f, 3.79f, 3.82f, 3.87f, 3.93f, 4.00f, 4.10f, 4.20f};
+  static const int P[] = {0, 5, 10, 20, 30, 40, 50, 60, 70, 79, 90, 100};
+  if (v <= V[0]) return 0;
+  for (int i = 1; i < 12; i++)
+    if (v <= V[i]) return lroundf(P[i - 1] + (P[i] - P[i - 1]) * (v - V[i - 1]) / (V[i] - V[i - 1]));
+  return 100;
+}
+
+void battUpdate() {
+  static uint32_t next = 0;
+  static float vf = 0, af = 0;
+  if (millis() < next) return;
+  next = millis() + 1000;
+  float v = M5StackChan.getBatteryVoltage(), a = M5StackChan.getBatteryCurrent();
+  Batt b;
+  if (v < 2.5f) {                        // 读不到（没有电池或芯片没起来）
+    vf = 0;
+  } else {
+    float rest = v + a * 0.12f;          // 补回内阻上的压降（约 0.12 Ω）
+    if (vf == 0) { vf = rest; af = a; }
+    else { vf += (rest - vf) * 0.1f; af += (a - af) * 0.2f; }
+    b.mv = lroundf(v * 1000);
+    b.ma = lroundf(a * 1000);
+    // 用电池时整机耗电一百多毫安；插着线时电池电流是负的（在充电），或者只有一二十毫安（充满后充电停了，电池只补一点点）
+    bool charging = af < -0.010f;
+    b.power = charging || af < 0.060f;
+    int p = b.power && !charging ? 100 : battPctOf(vf);   // 插着线、充电已经停了 = 充满
+    portENTER_CRITICAL(&gBattLock);
+    int old = gBatt.pct;
+    portEXIT_CRITICAL(&gBattLock);
+    b.pct = (old < 0 || abs(p - old) >= 2 || p == 100 || p <= 5) ? p : old;
+  }
+  portENTER_CRITICAL(&gBattLock);
+  gBatt = b;
+  portEXIT_CRITICAL(&gBattLock);
+}
+
+Batt battGet() {
+  portENTER_CRITICAL(&gBattLock);
+  Batt b = gBattSimOn ? gBattSim : gBatt;
+  portEXIT_CRITICAL(&gBattLock);
+  return b;
+}
+
+bool battSerial(const String& cmd) {
+  if (!cmd.startsWith("batt")) return false;
+  String arg = cmd.substring(4);
+  arg.trim();
+  portENTER_CRITICAL(&gBattLock);
+  if (arg == "real" || arg.length() == 0) gBattSimOn = false;
+  else { gBattSimOn = true; gBattSim = Batt(); gBattSim.pct = arg.toInt(); gBattSim.power = arg.indexOf("chg") > 0; }
+  Batt r = gBatt;
+  portEXIT_CRITICAL(&gBattLock);
+  Serial.printf("BATT pct=%d power=%d mv=%d ma=%d sim=%d\n", r.pct, (int)r.power, r.mv, r.ma, (int)gBattSimOn);
+  return true;
+}

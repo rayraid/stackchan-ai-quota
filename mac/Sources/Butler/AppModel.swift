@@ -46,8 +46,12 @@ final class AppModel: ObservableObject {
 
     func start() {
         startServer()
-        work.async { AgentHooks.refreshBundledHooks() }
+        work.async { AgentHooks.refreshBundledHooks(); HookInstaller.migrateOldAntigravity() }
         work.async { [engine] in engine.readShared(); engine.runCLI() }
+        prepareCLI()
+        timers.append(Timer.scheduledTimer(withTimeInterval: 24 * 3600, repeats: true) { [weak self] _ in   // 每天看一次 CodexBar 有没有新版
+            MainActor.assumeIsolated { self?.prepareCLI() }
+        })
         timers.append(Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.work.async { self?.engine.readShared() } }
         })
@@ -73,9 +77,26 @@ final class AppModel: ObservableObject {
     }
     func refreshNow() { work.async { [engine] in engine.runCLI() } }
 
+    /// 读额度的组件（CodexBar 命令行）：没有就下载，有新版就更新
+    @Published private(set) var cliBusy = false
+    func prepareCLI() {
+        guard !cliBusy else { return }
+        if let (_, src) = CodexBarCLI.path(), src != .managed { return }
+        cliBusy = true
+        Task {
+            let changed = await CodexBarCLI.ensure()
+            await MainActor.run {
+                self.cliBusy = false
+                self.objectWillChange.send()
+                if changed { self.refreshNow() }
+            }
+        }
+    }
+
     func startServer() {
         let name = settings.robotName.isEmpty ? "StackChan Butler" : "StackChan Butler (\(Host.current().localizedName ?? "Mac"))"
         server.start(port: settings.port, macId: settings.macId, name: name)
+        try? String(settings.port).write(to: Paths.support.appendingPathComponent("port"), atomically: true, encoding: .utf8)   // 钩子脚本从这里知道端口
     }
 
     func refresh() {
@@ -138,7 +159,13 @@ final class AppModel: ObservableObject {
         case ("POST", "/ack"):
             engine.ack(d["id"] as? String ?? ""); return .json(["ok": true])
         case ("POST", "/clear"):
-            engine.clear(d["id"] as? String ?? ""); return .json(["ok": true])
+            if let ids = d["ids"] as? [String] { engine.clear(ids: ids, why: "摸头熄灯") }     // 机器人上摸头
+            if let ids = d["done_ids"] as? [String] { engine.clear(ids: ids, why: "做完了，提醒过就熄灯") }   // 「做完了」整屏提醒完
+            else { engine.clear(d["id"] as? String ?? "") }
+            return .json(["ok": true])
+        case ("POST", "/hook") where r.isLocal:     // 小管家自己的钩子（butler-hook.sh）
+            engine.onHook(tool: r.headers["x-butler-tool"] ?? "ai", event: r.headers["x-butler-event"] ?? "", d)
+            return .json(["ok": true])
         case ("POST", "/cmd") where r.isLocal:      // 本机脚本用：让机器人点头、响一声、升级……
             engine.send(d["do"] as? String ?? "nod"); return .json(["ok": true])
         default:

@@ -7,7 +7,6 @@ final class WizardModel: ObservableObject {
     // 必备工具
     @Published var claudeAuth: Bool? = nil
     @Published var authorizing = false
-    @Published var peonFixed = false
     // 机器人
     @Published var port: String?
     @Published var hello: RobotHello?
@@ -125,30 +124,25 @@ struct WizardView: View {
     init(step: Int = 0) { let m = WizardModel(); m.step = step; _w = StateObject(wrappedValue: m) }
     @Environment(\.dismissWindow) private var dismissWindow
 
-    private var steps: [String] { [t("欢迎"), t("必备工具"), t("连接机器人"), t("连上 WiFi"), t("选择 AI"), t("选个样子"), t("试一下"), t("完成")] }
+    // 按 Apple 设计规范只留必须的几步；显示哪些 AI、机器人长什么样都有默认值，以后在设置里改
+    private var steps: [String] { [t("欢迎"), t("读取额度和提醒"), t("连接机器人"), t("连上 WiFi"), t("完成")] }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 2) {
+                // 步骤列表：和 macOS 安装器一样的小圆点
+                VStack(alignment: .leading, spacing: 14) {
                     ForEach(Array(steps.enumerated()), id: \.offset) { i, name in
-                        HStack(spacing: 9) {
-                            ZStack {
-                                Circle().fill(i < w.step ? Color.green : i == w.step ? Color.accentColor : Color.clear)
-                                Circle().stroke(i <= w.step ? Color.clear : Color.secondary.opacity(0.5), lineWidth: 1.5)
-                                Text(i < w.step ? "✓" : "\(i + 1)").font(.system(size: 11, weight: .bold)).foregroundStyle(i <= w.step ? Color.white : Color.secondary)
-                            }.frame(width: 20, height: 20)
-                            Text(name).foregroundStyle(i == w.step ? Color.accentColor : i < w.step ? Color.primary : Color.secondary)
-                                .fontWeight(i == w.step ? .semibold : .regular)
+                        HStack(spacing: 10) {
+                            Circle().fill(i == w.step ? Color.accentColor : Color.secondary.opacity(i < w.step ? 0.8 : 0.4)).frame(width: 9, height: 9)
+                            Text(name).foregroundStyle(i == w.step ? Color.primary : i < w.step ? Color.primary.opacity(0.85) : Color.secondary)
+                                .fontWeight(i == w.step ? .bold : .regular)
                         }
-                        .padding(.horizontal, 8).padding(.vertical, 6)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 7).fill(i == w.step ? Color.accentColor.opacity(0.12) : .clear))
                     }
                     Spacer()
                 }
-                .padding(14)
-                .frame(width: 200)
+                .padding(.horizontal, 18).padding(.vertical, 22)
+                .frame(width: 200, alignment: .leading)
                 .background(Color.primary.opacity(0.04))
                 Divider()
                 ScrollView {
@@ -159,9 +153,8 @@ struct WizardView: View {
             }
             Divider()
             HStack {
-                Text(t("第 %d 步，共 %d 步", w.step + 1, steps.count)).font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                if w.step > 0 { Button(t("上一步")) { go(-1) }.disabled(w.flashing || w.linking) }
+                if w.step > 0 { Button(t("返回")) { go(-1) }.disabled(w.flashing || w.linking) }
                 Button(w.step == steps.count - 1 ? t("完成") : t("继续")) { go(1) }
                     .keyboardShortcut(.defaultAction)
                     .disabled(w.flashing || w.linking)
@@ -190,34 +183,30 @@ struct WizardView: View {
         case 1: tools
         case 2: robot
         case 3: wifi
-        case 4: pickAI
-        case 5: look
-        case 6: tryIt
         default: finish
         }
     }
 
     private func title(_ s: String, _ sub: String = "") -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(s).font(.system(size: 22, weight: .bold))
+            Text(s).font(.title.bold())
             if !sub.isEmpty { Text(sub).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         }
     }
     private func hint(_ head: String, _ body: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text(head).fontWeight(.semibold).foregroundStyle(Color.accentColor)
-            Text(body).fixedSize(horizontal: false, vertical: true)
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "info.circle").foregroundStyle(.secondary)
+            (Text(head + "　").fontWeight(.semibold) + Text(body).foregroundStyle(.secondary))
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .font(.callout)
-        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.accentColor.opacity(0.08)))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
     private func checkRow(_ ok: Bool?, _ name: String, _ note: String, @ViewBuilder trailing: () -> some View) -> some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle().fill(ok == true ? Color.green : ok == false ? Color.orange : Color.gray.opacity(0.4))
-                Text(ok == true ? "✓" : ok == false ? "!" : "…").font(.system(size: 12, weight: .heavy)).foregroundStyle(.white)
-            }.frame(width: 22, height: 22)
+            Image(systemName: ok == true ? "checkmark.circle.fill" : ok == false ? "exclamationmark.circle.fill" : "circle.dotted")
+                .font(.system(size: 20))
+                .foregroundStyle(ok == true ? Color.green : ok == false ? Color.orange : Color.secondary)
+                .frame(width: 22, height: 22)
             VStack(alignment: .leading, spacing: 2) {
                 Text(name).fontWeight(.semibold)
                 Text(note).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -234,7 +223,7 @@ struct WizardView: View {
             HStack(spacing: 24) {
                 RobotScreen(state: "calm", width: 180)
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(t("让 StackChan 帮你盯着 AI")).font(.system(size: 22, weight: .bold))
+                    Text(t("让 StackChan 帮你盯着 AI")).font(.title.bold())
                     Text(t("装好以后，它会一直显示各家 AI 订阅还剩多少；任何一个 AI 编程助手在等你回复时，它会变脸、点头、亮灯、响一声。"))
                         .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
@@ -246,32 +235,39 @@ struct WizardView: View {
         }
     }
 
-    // ---------- 2 必备工具 ----------
+    // ---------- 2 读取额度和提醒 ----------
+    // 读额度的 CodexBar 命令行小管家自己准备；提醒用小管家自己的钩子，每个 AI 工具一键接通
     private var tools: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            title(t("先看看这台 Mac 上缺什么"), t("小管家自己不读额度、也不往 AI 工具里加东西，靠下面两个开源工具。已经装好的会直接打勾。"))
+        let cliOK = Engine.codexbarPath() != nil && !model.cliBusy
+        return VStack(alignment: .leading, spacing: 12) {
+            title(t("读取额度和提醒"), t("读额度的组件小管家会自己准备。下面点几下，让它能读到 Claude 的额度、知道哪个 AI 在等你。"))
             VStack(spacing: 0) {
-                checkRow(Env.codexbarApp && Env.codexbarCLI != nil, "CodexBar", t("读取各家 AI 的剩余额度")) {
-                    if !(Env.codexbarApp && Env.codexbarCLI != nil) { Link(t("去下载"), destination: URL(string: "https://github.com/steipete/CodexBar")!) }
-                    else { Text(t("已安装")).font(.caption).foregroundStyle(.secondary) }
+                checkRow(model.cliBusy ? nil : cliOK, t("读取额度的组件"), CodexBarCLI.describe()) {
+                    if model.cliBusy { ProgressView().controlSize(.small) }
+                    else if !cliOK { Button(t("重试")) { model.prepareCLI() } }
                 }
                 Divider()
                 checkRow(w.claudeAuth ?? model.subs.contains { $0.id == "claude" && $0.shown != nil }, t("读取 Claude 额度的授权"), t("会弹出钥匙串窗口，请点「始终允许」")) {
                     Button(w.authorizing ? t("等你点允许…") : t("去授权")) {
                         w.authorizing = true
                         Env.authorizeClaude { ok in DispatchQueue.main.async { w.authorizing = false; w.claudeAuth = ok; model.refreshNow() } }
-                    }.disabled(w.authorizing || Env.codexbarCLI == nil)
+                    }.disabled(w.authorizing || !cliOK)
                 }
-                Divider()
-                checkRow(Env.peonInstalled, "peon-ping", t("盯住各个 AI 工具，在它们等你时发信号")) {
-                    if !Env.peonInstalled { Link(t("去下载"), destination: URL(string: "https://github.com/PeonPing/peon-ping")!) }
-                    else { Text(t("已安装")).font(.caption).foregroundStyle(.secondary) }
-                }
-                Divider()
-                checkRow(Env.peonInstalled ? (Env.peonPointsHere(port: model.settings.port) || w.peonFixed) : nil, t("peon-ping 的信号发给小管家"), t("改之前会自动备份它的设置")) {
-                    if Env.peonInstalled && !(Env.peonPointsHere(port: model.settings.port) || w.peonFixed) {
-                        Button(t("一键设置")) { w.peonFixed = Env.pointPeonHere(port: model.settings.port) }
-                    } else if Env.peonInstalled { Text(t("已设置好")).font(.caption).foregroundStyle(.secondary) }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+            Text(t("哪些 AI 在等你时提醒")).font(.headline).padding(.top, 4)
+            VStack(spacing: 0) {
+                ForEach(Array(KNOWN_AGENTS.enumerated()), id: \.offset) { i, a in
+                    if i > 0 { Divider() }
+                    HStack {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(a)
+                            if a == "Cursor" || a == "Antigravity" { Text(t("只会提醒「做完了」")).font(.caption).foregroundStyle(.secondary) }
+                        }
+                        Spacer()
+                        AgentConnectControl(agent: a)
+                    }.padding(.vertical, 6)
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 4)
@@ -363,90 +359,27 @@ struct WizardView: View {
         }
     }
 
-    // ---------- 5 选择 AI ----------
-    private var pickAI: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            title(t("要显示和提醒哪些"))
-            Text(t("屏幕上显示的额度（CodexBar 找到 %d 家）", model.subs.count)).font(.caption).foregroundStyle(.secondary)
-            VStack(spacing: 0) {
-                ForEach(model.subs) { s in
-                    HStack {
-                        BrandBadge(id: s.id, mono: s.mono, hue: s.hue)
-                        Text(s.name)
-                        Spacer()
-                        Toggle("", isOn: Binding(get: { !model.settings.subHidden.contains(s.id) }, set: { on in
-                            model.settings.subHidden.removeAll { $0 == s.id }
-                            if !on { model.settings.subHidden.append(s.id) }
-                        })).labelsHidden()
-                    }.padding(.vertical, 5)
-                }
-            }
-            .padding(.horizontal, 14).padding(.vertical, 4)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
-            Text(t("哪些 AI 工具在等你时提醒")).font(.caption).foregroundStyle(.secondary).padding(.top, 6)
-            VStack(spacing: 0) {
-                ForEach(KNOWN_AGENTS, id: \.self) { a in
-                    let st = AgentHooks.status(a)
-                    HStack {
-                        Text(a)
-                        Spacer()
-                        Text(st == .connected ? t("已接通") : st == .partial ? t("还差一步") : t("以后在设置里接通"))
-                            .font(.caption).foregroundStyle(st == .connected ? .green : .secondary)
-                    }.padding(.vertical, 5)
-                }
-            }
-            .padding(.horizontal, 14).padding(.vertical, 4)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
-        }
-    }
-
-    // ---------- 6 选个样子 ----------
-    private var look: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            title(t("选一个配色和眼睛"), t("以后随时可以在设置里换。"))
-            HomeStylePicker()
-            HStack(alignment: .top, spacing: 20) {
-                RobotScreen(state: "calm", width: 240)
-                VStack(alignment: .leading, spacing: 12) {
-                    Picker(t("配色"), selection: $model.settings.theme) {
-                        Text(t("深夜蓝")).tag("night"); Text(t("纯黑")).tag("black"); Text(t("暖色")).tag("warm"); Text(t("浅色")).tag("light")
-                    }
-                    Picker(t("眼睛"), selection: $model.settings.eye) {
-                        Text(t("胶囊")).tag("capsule"); Text(t("圆点")).tag("round"); Text(t("竖条")).tag("bar")
-                    }
-                    Swatches(selection: $model.settings.eyeColor, colors: [("", t("跟随配色")), ("#9ff3ff", t("青")), ("#ffd27a", t("琥珀")), ("#ffb3d1", t("粉")), ("#b8ffb0", t("薄荷"))])
-                }.frame(width: 260)
-            }
-        }
-    }
-
-    // ---------- 7 试一下 ----------
-    private var tryIt: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            title(t("看看它有没有反应"), t("点下面的按钮，看机器人有没有动、亮、响。"))
-            HStack(spacing: 10) {
-                Button(t("让它点个头")) { model.send("nod") }
-                Button(t("发一条测试提醒")) { model.testAlert() }
-                Button(t("响一声")) { model.send("chime") }
-                Button(t("消掉测试提醒")) { model.engine.clear() }
-            }
-            checkRow(model.deviceOnline, model.deviceOnline ? t("机器人已连上") : t("机器人还没连上"),
-                     model.device.map { t("地址 %@ · 固件 %@", $0.ip, $0.fw.isEmpty ? "—" : $0.fw) } ?? t("回到「连上 WiFi」那一步再试一次")) { EmptyView() }
-            if model.deviceOnline { hint(t("小提示"), t("摸机器人的头 = 「知道了」。")) }
-        }
-    }
-
-    // ---------- 8 完成 ----------
+    // ---------- 5 完成（顺便试一下） ----------
     private var finish: some View {
         VStack(alignment: .leading, spacing: 14) {
             title(t("装好了"), t("以后在屏幕右上角菜单栏的小机器人图标里找到我。"))
+            checkRow(model.deviceOnline, model.deviceOnline ? t("机器人已连上，刚才点了一下头") : t("机器人还没连上"),
+                     model.device.map { t("地址 %@ · 固件 %@", $0.ip, $0.fw.isEmpty ? "—" : $0.fw) } ?? t("回到「连上 WiFi」那一步再试一次")) { EmptyView() }
+            HStack(spacing: 8) {
+                Button(t("再试一次")) { model.send("nod") }
+                Button(t("发一条测试提醒")) { model.testAlert() }
+                Button(t("消掉测试提醒")) { model.engine.clear() }
+            }
+            .disabled(!model.deviceOnline)
+            .padding(.leading, 34)
             Form {
                 Toggle(t("开机自动启动"), isOn: $model.settings.launchAtLogin)
                 Picker(t("菜单栏显示"), selection: $model.settings.menuBarMode) {
                     Text(t("小机器人 + 最紧张的额度")).tag(0); Text(t("只显示小机器人")).tag(1); Text(t("小机器人 + 在等你的数量")).tag(2)
                 }
-            }.formStyle(.grouped).frame(maxWidth: 480)
-            hint(t("小提示"), t("夜里 %@ 到 %@ 默认勿扰，可以在设置里改。", model.settings.quietStart, model.settings.quietEnd))
+            }.formStyle(.grouped).scrollContentBackground(.hidden).scrollDisabled(true).frame(maxWidth: 480, maxHeight: 110)
+            hint(t("小提示"), t("要显示哪些 AI、机器人长什么样，以后都能在设置里改。") + t("夜里 %@ 到 %@ 默认勿扰，可以在设置里改。", model.settings.quietStart, model.settings.quietEnd))
         }
+        .onAppear { if model.deviceOnline { model.send("nod") } }
     }
 }

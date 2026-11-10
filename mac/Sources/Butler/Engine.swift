@@ -48,7 +48,25 @@ struct WaitItem: Identifiable, Hashable {
     var kind: String; var detail: String; var since: Double; var acked: Bool; var sessionId: String
     var ttl: Double = 0            // >0 时到点自动消掉（额度恢复的通知）
 }
-struct DeviceSeen: Hashable { var ip: String; var at: Date; var fw: String; var rssi: Int; var up: Int }
+struct DeviceSeen: Hashable {
+    var ip: String; var at: Date; var fw: String; var rssi: Int; var up: Int
+    var bat: Int? = nil          // 电量百分比（固件 2.1.2 起报上来）
+    var power = false            // 插着线：正在充电或已充满
+    var mv = 0, ma = 0           // 电池电压（毫伏）、电流（毫安，放电为正）
+
+    /// 菜单栏面板顶部用的短说法
+    var batteryShort: String? {
+        guard let b = bat else { return nil }
+        if power && b >= 99 { return t("已充满") }
+        return power ? t("充电中 %d%%", b) : t("电量 %d%%", b)
+    }
+    /// 「设置 → 机器人」里用的说法
+    var batteryLong: String {
+        guard let b = bat else { return "—" }
+        if power && b >= 99 { return t("已充满") }
+        return power ? t("%d%%（正在充电）", b) : t("%d%%（用电池）", b)
+    }
+}
 
 final class Engine: @unchecked Sendable {
     private let lock = NSLock()
@@ -61,6 +79,9 @@ final class Engine: @unchecked Sendable {
     private var sharedMtime: Double = 0
     private var usageSig = ""
     private var waiting: [WaitItem] = []
+    private var hookSeen: Set<String> = []
+    private var lastBattLogged = -100
+    private var lastBattPower = false
     private var seq = 0
     private var peonMtime: Double = 0
     private var lastLeft: [String: Int] = [:]
@@ -80,12 +101,7 @@ final class Engine: @unchecked Sendable {
     static let sharedUsagePath = NSString(string: "~/Library/Application Support/CodexBar/CLIUsageCache/usage.json").expandingTildeInPath
     static let peonStatePath = NSString(string: "~/.claude/hooks/peon-ping/.state.json").expandingTildeInPath
 
-    static func codexbarPath() -> String? {
-        let cands = ["/opt/homebrew/bin/codexbar", "/usr/local/bin/codexbar",
-                     "/Applications/CodexBar.app/Contents/Helpers/CodexBarCLI",
-                     NSString(string: "~/Applications/CodexBar.app/Contents/Helpers/CodexBarCLI").expandingTildeInPath]
-        return cands.first { FileManager.default.isExecutableFile(atPath: $0) }
-    }
+    static func codexbarPath() -> String? { CodexBarCLI.path()?.0 }
 
     // ---------- 额度：主来源 CodexBar 命令行 ----------
     func runCLI() {
@@ -285,11 +301,77 @@ final class Engine: @unchecked Sendable {
         return item
     }
 
+    // ---------- 小管家自己的钩子（butler-hook.sh）：AI 工具直接报事件 ----------
+    /// tool：claude / codex / cursor / antigravity；event：钩子名（Antigravity 由命令行参数给，其他在 JSON 里）
+    @discardableResult
+    func onHook(tool: String, event argEvent: String, _ d: [String: Any]) -> WaitItem? {
+        func str(_ keys: String...) -> String {
+            for k in keys { if let v = d[k] as? String, !v.isEmpty { return v } }
+            return ""
+        }
+        var ev = argEvent.isEmpty ? str("hook_event_name", "hookName", "event") : argEvent
+        // Cursor 用小写开头的名字
+        ev = ["stop": "Stop", "beforeSubmitPrompt": "UserPromptSubmit", "sessionStart": "SessionStart", "sessionEnd": "SessionEnd",
+              "preToolUse": "PreToolUse", "postToolUse": "PostToolUse"][ev] ?? ev
+        let rawSid = str("session_id", "sessionId", "conversation_id", "conversationId", "thread_id")
+        let sid = rawSid.isEmpty ? "" : tool + ":" + rawSid
+        let roots = (d["workspace_roots"] ?? d["workspacePaths"] ?? d["workspaceRoots"]) as? [String] ?? []
+        let cwd = str("cwd").isEmpty ? (roots.first ?? "") : str("cwd")
+        let project = cwd.isEmpty ? "?" : URL(fileURLWithPath: cwd).lastPathComponent
+        let agent = HookInstaller.agentName(tool)
+        let fromSubagent = !str("agent_id").isEmpty         // Claude Code 子任务里的事件
+        let toolName = str("tool_name", "toolName")
+        if lock.withLock({ hookSeen.insert(tool).inserted }) { log("收到", agent, "的钩子事件（小管家自己的钩子在工作）") }
+
+        switch ev {
+        case "UserPromptSubmit", "PreToolUse", "PostToolUse", "SessionStart", "SessionEnd", "PreInvocation":
+            // 你回到这个对话了（发了消息、批准了操作、重开了对话）：熄灯
+            if !fromSubagent, !sid.isEmpty { clear(session: sid, why: "你已经回去了") }
+            return nil
+        case "PermissionRequest":
+            return addWaiting(agent: agent, project: project, kind: toolName == "AskUserQuestion" ? "question" : "approval",
+                              detail: toolName, sessionId: sid)
+        case "Notification":
+            // 批准弹窗走 PermissionRequest；Claude Code 空闲时每分钟重复的 idle_prompt 不理
+            if str("notification_type") == "elicitation_dialog" {
+                return addWaiting(agent: agent, project: project, kind: "question", detail: "", sessionId: sid)
+            }
+            return nil
+        case "StopFailure":
+            return addWaiting(agent: agent, project: project, kind: "error", detail: "", sessionId: sid)
+        case "Stop":
+            if tool == "codex", CodexThreads.isSubagent(rawSid) {
+                log("Codex 子任务做完了（主任务还在跑），不提醒：", project); return nil
+            }
+            // Antigravity：你自己停的、后台还在跑的不算；Cursor：你中途停掉的不算
+            let reason = str("terminationReason", "status")
+            if reason == "USER_CANCELED" || reason == "aborted" || (d["fullyIdle"] as? Bool) == false { return nil }
+            let failed = reason == "ERROR" || reason == "error" || d["error"] != nil
+            return addWaiting(agent: agent, project: project, kind: failed ? "error" : "done", detail: "", sessionId: sid)
+        default:
+            return nil
+        }
+    }
+
+    /// 这个对话的提醒全部熄掉
+    func clear(session sid: String, why: String) {
+        var changed = false
+        lock.withLock {
+            waiting.removeAll { w in
+                guard w.sessionId == sid else { return false }
+                log("等你回复 -", w.agent, "·", w.project, "（\(why)）"); changed = true; return true
+            }
+        }
+        if changed { onChange() }
+    }
+
     func onPeonPush(title: String, body: String) -> WaitItem? {
         var project = title.trimmingCharacters(in: .whitespaces), agent = ""
         for (raw, shown) in AGENT_NAMES where project.hasSuffix(" - " + raw) {
             project = String(project.dropLast(raw.count + 3)); agent = shown; break
         }
+        // 已经用小管家自己的钩子接通的工具，peon-ping 再发来的就不要了（不然同一件事提醒两次）
+        if !agent.isEmpty, HookInstaller.status(agent) == .connected { return nil }
         let msg = body.trimmingCharacters(in: .whitespacesAndNewlines)
         let low = msg.lowercased()
         var kind = "note", detail = ""
@@ -331,7 +413,12 @@ final class Engine: @unchecked Sendable {
             waiting.removeAll { w in
                 if w.ttl > 0 && now - w.since > w.ttl { return true }
                 // 「做完了」「出错停下了」不挡着 AI 干活，到设定时间就熄灯；「要你批准」「有问题问你」挂到 ttl
-                if s.doneTTL > 0, ["done", "error", "note"].contains(w.kind), now - w.since > Double(s.doneTTL * 60) {
+                let doneKind = ["done", "note"].contains(w.kind)
+                // 「做完了」提醒完就熄：机器人闪完会来 /clear；机器人不在、勿扰不闪时，过一会儿这里兜底
+                if s.doneFlash, doneKind, now - w.since > Double(max(s.alertSecs, 10) + 120) {
+                    log("等你回复 -", w.agent, "·", w.project, "（做完了，提醒过了）"); return true
+                }
+                if s.doneTTL > 0, w.kind == "error" || (doneKind && !s.doneFlash), now - w.since > Double(s.doneTTL * 60) {
                     log("等你回复 -", w.agent, "·", w.project, "（做完了，到时间自动熄灯）"); return true
                 }
                 if now - w.since > ttl { log("等你回复 -", w.agent, "·", w.project, "（挂太久，自动消掉）"); return true }
@@ -354,6 +441,15 @@ final class Engine: @unchecked Sendable {
     }
     func clear(_ id: String = "") {
         lock.withLock { waiting.removeAll { id.isEmpty || $0.id == id } }
+        onChange()
+    }
+    func clear(ids: [String], why: String) {
+        lock.withLock {
+            waiting.removeAll { w in
+                guard ids.contains(w.id) else { return false }
+                log("等你回复 -", w.agent, "·", w.project, "（\(why)）"); return true
+            }
+        }
         onChange()
     }
 
@@ -382,13 +478,25 @@ final class Engine: @unchecked Sendable {
     }
 
     func seenDevice(ip: String, query: [String: String]) {
-        let d = DeviceSeen(ip: ip, at: Date(), fw: query["fw"] ?? "", rssi: Int(query["rssi"] ?? "") ?? 0, up: Int(query["up"] ?? "") ?? 0)
-        let isNew: Bool = lock.withLock {
+        var d = DeviceSeen(ip: ip, at: Date(), fw: query["fw"] ?? "", rssi: Int(query["rssi"] ?? "") ?? 0, up: Int(query["up"] ?? "") ?? 0)
+        d.bat = query["bat"].flatMap { Int($0) }
+        d.power = query["pwr"] == "1"
+        d.mv = Int(query["bmv"] ?? "") ?? 0
+        d.ma = Int(query["bma"] ?? "") ?? 0
+        let (isNew, logBatt): (Bool, Bool) = lock.withLock {
             let n = device == nil || device!.ip != ip || Date().timeIntervalSince(device!.at) > 60
+            // 电量记进日志：刚连上、插拔线、每变 10 个点（方便以后校准电压和百分比的对应）
+            var lb = false
+            if let b = d.bat {
+                if n || d.power != lastBattPower || abs(b - lastBattLogged) >= 10 { lb = true; lastBattLogged = b; lastBattPower = d.power }
+            }
             device = d
-            return n
+            return (n, lb)
         }
         if isNew { log("机器人连上来了：", ip, "固件", d.fw); onChange() }
+        if logBatt, let b = d.bat {
+            log("机器人电量", "\(b)%", d.power ? "（插着线）" : "（用电池）", String(format: "%.2fV %.3fA", Double(d.mv) / 1000, Double(d.ma) / 1000))
+        }
     }
 
     // ---------- 给机器人的状态 ----------
@@ -416,7 +524,7 @@ final class Engine: @unchecked Sendable {
             "subs": subs.map { sub -> [String: Any] in
                 var d: [String: Any] = ["id": sub.id, "name": sub.name, "mono": sub.mono, "hue": sub.hue, "ts": Int(sub.ts), "stale": sub.stale,
                                         "icon": s.showIcons ? IconStore.version(sub.id) : "",
-                                        "windows": sub.windows.map { ["label": $0.label, "left": $0.left, "level": $0.level, "reset": $0.reset, "pace": $0.pace] }]
+                                        "windows": sub.windows.map { ["label": $0.label, "left": $0.left, "level": $0.level, "reset": $0.reset, "pace": $0.pace, "mins": $0.minutes] }]
                 if let w = sub.shown {
                     d["left"] = w.left; d["label"] = w.label; d["level"] = w.level; d["reset"] = w.reset; d["pace"] = w.pace; d["error"] = ""
                 } else {
@@ -466,7 +574,7 @@ final class Engine: @unchecked Sendable {
     static func deviceCfg(_ s: AppSettings, now: Date = Date()) -> [String: Any] {
         let h = Calendar.current.component(.hour, from: now)
         return [
-            "rev": s.rev, "home": s.homeStyle, "alert_secs": s.alertSecs,
+            "rev": s.rev, "home": s.homeStyle, "list": s.listStyle, "detail": s.detailStyle, "alert_secs": s.alertSecs, "alert_style": s.alertStyle, "done_flash": s.doneFlash,
             "theme": s.theme, "eye": s.eye, "eye_color": s.eyeColor, "bright": s.brightness,
             "used": s.showUsed, "clock": s.clock, "blink": s.blink, "look": s.look,
             "sleepy": s.sleepyNight && (h >= 23 || h < 7), "dim_after": s.dimAfter,

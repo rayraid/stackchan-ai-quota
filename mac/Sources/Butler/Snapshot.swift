@@ -9,8 +9,8 @@ enum Snapshot {
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         if let l = ProcessInfo.processInfo.environment["BUTLER_LANG"].flatMap(Lang.init(rawValue:)) { currentLang = l; AppModel.shared.lang = l }
         var jobs: [(String, AnyView, NSSize)] = []
-        for p in SettingsPage.allCases { jobs.append(("settings-\(p.rawValue)", AnyView(SettingsView(page: p)), NSSize(width: 820, height: 700))) }
-        for i in 0..<8 { jobs.append(("wizard-\(i)", AnyView(WizardView(step: i)), NSSize(width: 820, height: 560))) }
+        for p in SettingsPage.allCases { jobs.append(("settings-\(p.rawValue)", AnyView(SettingsPane(page: p)), NSSize(width: SettingsPage.width, height: p.height))) }
+        for i in 0..<5 { jobs.append(("wizard-\(i)", AnyView(WizardView(step: i)), NSSize(width: 820, height: 560))) }
         jobs.append(("menu", AnyView(MenuView().background(Color(nsColor: .windowBackgroundColor))), NSSize(width: 340, height: 520)))
         var windows: [NSWindow] = []
         for (name, view, size) in jobs {

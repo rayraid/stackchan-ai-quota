@@ -14,9 +14,9 @@ extension Color {
 
 func levelColor(_ level: String) -> Color {
     switch level {
-    case "ok": return Color(hex: "#30c048")
-    case "mid": return Color(hex: "#e2a400")
-    case "low": return Color(hex: "#ff453a")
+    case "ok": return Color(nsColor: .systemGreen)      // 系统色：深浅色、增强对比度都会自动调
+    case "mid": return Color(nsColor: .systemYellow)
+    case "low": return Color(nsColor: .systemRed)
     default: return .secondary
     }
 }
@@ -51,7 +51,8 @@ struct RobotPreview: NSViewRepresentable {
         let s = model.settings
         let subs: [[String: Any]] = model.subs.filter { !$0.hidden }.map { sub in
             ["id": sub.id, "name": sub.name, "mono": sub.mono, "hue": sub.hue,
-             "left": sub.shown?.left ?? -1, "label": sub.shown?.label ?? "", "reset": sub.shown?.reset ?? ""]
+             "left": sub.shown?.left ?? -1, "label": sub.shown?.label ?? "", "reset": sub.shown?.reset ?? "", "level": sub.shown?.level ?? "na",
+             "windows": sub.windows.map { ["label": $0.label, "left": $0.left, "level": $0.level, "reset": $0.reset, "pace": $0.pace, "mins": $0.minutes] }]
         }
         var icons: [String: String] = [:]
         if s.showIcons {
@@ -61,7 +62,7 @@ struct RobotPreview: NSViewRepresentable {
             if let u = IconStore.pngDataURL("claude", size: 56, dark: true) { icons["alert"] = u }
         }
         var p: [String: Any] = [
-            "state": state, "home": s.homeStyle, "theme": s.theme, "icons": icons, "eye": s.eye, "eyeColor": s.eyeColor, "clock": s.clock, "used": s.showUsed,
+            "state": state, "home": s.homeStyle, "list": s.listStyle, "detail": s.detailStyle, "alert": s.alertStyle, "theme": s.theme, "icons": icons, "eye": s.eye, "eyeColor": s.eyeColor, "clock": s.clock, "used": s.showUsed,
             "blink": s.blink, "look": s.look, "lang": model.lang.rawValue, "subs": subs,
             "face": model.engine.faceIds(model.subs, s), "mid": s.midPercent, "low": s.lowPercent,
         ]
@@ -109,17 +110,32 @@ struct HomeStylePicker: View {
     }
 }
 
-/// 设置侧边栏里那种彩色小方块图标
-struct SideIcon: View {
-    var symbol: String
-    var color: Color
+/// 全部额度页、明细页的样式：几个缩略图，点一下就换（和首页样式同一种排法）
+struct PageStylePicker: View {
+    var state: String                       // 预览哪一页：list / detail
+    var key: String                         // 预览里对应的参数：list / detail
+    var styles: [(String, String)]
+    @Binding var selection: String
     var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: 22, height: 22)
-            .background(RoundedRectangle(cornerRadius: 6).fill(color.gradient))
+        HStack(alignment: .top, spacing: 10) {
+            ForEach(styles, id: \.0) { st in
+                Button { selection = st.0 } label: {
+                    VStack(spacing: 5) {
+                        RobotPreview(state: state, overrides: [key: st.0, "look": false, "blink": false])
+                            .frame(width: 96, height: 72)
+                            .allowsHitTesting(false)
+                            .padding(3)
+                            .background(RoundedRectangle(cornerRadius: 7).fill(Color.black))
+                            .overlay(RoundedRectangle(cornerRadius: 7).stroke(selection == st.0 ? Color.accentColor : Color.clear, lineWidth: 2.5))
+                        Text(t(st.1)).font(.caption).foregroundStyle(selection == st.0 ? .primary : .secondary)
+                    }
+                }.buttonStyle(.plain)
+            }
+        }
     }
+    static let list: [(String, String)] = [("A", "A 小卡片"), ("B", "B 一行一家"), ("C", "C 竖条")]
+    static let detail: [(String, String)] = [("A", "A 大圆环"), ("B", "B 横条")]
+    static let alert: [(String, String)] = [("now", "经典整屏"), ("B", "B 柔和变色"), ("C", "C 脸 + 卡片")]
 }
 
 /// 一排颜色圆点
@@ -200,10 +216,10 @@ struct QuotaBar: View {
     }
 }
 
-/// 菜单栏上的小机器人图标
+/// 菜单栏上的小机器人图标（黑白模板图，由系统上色）。宽度固定，有人等你时右上角挖出一个小圆点，旁边的图标不会被挤动。
 enum MenuIcon {
     static func image(alert: Bool) -> NSImage {
-        let img = NSImage(size: NSSize(width: alert ? 22 : 18, height: 14), flipped: false) { _ in
+        let img = NSImage(size: NSSize(width: 20, height: 14), flipped: false) { _ in
             let body = NSBezierPath(roundedRect: NSRect(x: 0.75, y: 0.75, width: 16.5, height: 12.5), xRadius: 3.5, yRadius: 3.5)
             NSColor.black.setStroke()
             body.lineWidth = 1.5
@@ -211,7 +227,13 @@ enum MenuIcon {
             NSColor.black.setFill()
             NSBezierPath(roundedRect: NSRect(x: 4.5, y: 4.5, width: 2.6, height: 5), xRadius: 1.3, yRadius: 1.3).fill()
             NSBezierPath(roundedRect: NSRect(x: 10.9, y: 4.5, width: 2.6, height: 5), xRadius: 1.3, yRadius: 1.3).fill()
-            if alert { NSBezierPath(ovalIn: NSRect(x: 17, y: 8, width: 5, height: 5)).fill() }
+            if alert {
+                let c = NSPoint(x: 16.6, y: 10.6)
+                NSGraphicsContext.current?.compositingOperation = .clear
+                NSBezierPath(ovalIn: NSRect(x: c.x - 4.6, y: c.y - 4.6, width: 9.2, height: 9.2)).fill()
+                NSGraphicsContext.current?.compositingOperation = .sourceOver
+                NSBezierPath(ovalIn: NSRect(x: c.x - 3.1, y: c.y - 3.1, width: 6.2, height: 6.2)).fill()
+            }
             return true
         }
         img.isTemplate = true

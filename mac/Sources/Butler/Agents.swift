@@ -1,4 +1,4 @@
-// 各个 AI 工具有没有接上 peon-ping（只读检查，不改它们的配置；只会更新小管家自己带的 Antigravity 转接脚本）
+// 各个 AI 工具有没有接上 peon-ping（老办法，只读检查）。小管家自己的钩子见 Hooks.swift
 import AppKit
 import SwiftUI
 
@@ -38,41 +38,36 @@ enum AgentHooks {
             return .none
         case "Antigravity":
             // Antigravity 2 的正式钩子；也认 peon-ping 自己那个「盯文件」的后台程序
-            if read("~/.gemini/config/hooks.json").contains("antigravity-hook") { return .connected }
+            if read("~/.gemini/config/hooks.json").contains("antigravity-hook") { return .connected }   // 旧版小管家的转接脚本
             let la = (try? FileManager.default.contentsOfDirectory(atPath: NSString(string: "~/Library/LaunchAgents").expandingTildeInPath)) ?? []
             return la.contains { $0.lowercased().contains("antigravity") && $0.lowercased().contains("peon") } ? .connected : .none
         default: return .none
         }
     }
 
-    /// Antigravity 钩子调用的转接脚本：放在应用支持目录，应用挪了位置也不会断
-    static var antigravityHookPath: String {
-        NSString(string: "~/Library/Application Support/StackChan Butler/hooks/antigravity-hook.sh").expandingTildeInPath
-    }
-
-    /// 应用启动时把自带的转接脚本放过去（应用更新后脚本也跟着更新）
+    /// 应用启动时把自带的钩子脚本放到应用支持目录（应用挪了位置也不会断；应用更新后脚本也跟着更新）
     static func refreshBundledHooks() {
-        guard let src = Bundle.main.url(forResource: "antigravity-hook", withExtension: "sh", subdirectory: "hooks") else { return }
-        let dst = URL(fileURLWithPath: antigravityHookPath)
-        try? FileManager.default.createDirectory(at: dst.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if let a = try? Data(contentsOf: src), (try? Data(contentsOf: dst)) != a {
-            try? a.write(to: dst)
-            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dst.path)
+        let dir = Paths.support.appendingPathComponent("hooks")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for src in Bundle.main.urls(forResourcesWithExtension: "sh", subdirectory: "hooks") ?? [] {
+            let dst = dir.appendingPathComponent(src.lastPathComponent)
+            if let a = try? Data(contentsOf: src), (try? Data(contentsOf: dst)) != a {
+                try? a.write(to: dst)
+                try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dst.path)
+            }
+        }
+        // 旧版的转接脚本（antigravity-hook.sh）已经没人用了
+        if !HookInstaller.read(HookInstaller.antigravityHooks).contains("antigravity-hook.sh") {
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent("antigravity-hook.sh"))
         }
     }
 
     static func howTo(_ agent: String) -> (text: String, command: String) {
         switch agent {
-        case "Claude Code":
-            return (t("装 peon-ping 时会自动接通 Claude Code。如果显示未接通，重新运行一次 peon-ping 的安装。"), "")
         case "Codex":
-            return (t("peon-ping 已经在 Codex 的配置里登记了。打开 Codex，输入 /hooks，找到 peon-ping 那一条，选择信任，就接通了。"), "")
-        case "Cursor":
-            return (t("peon-ping 能直接认 Cursor 的事件。在 ~/.cursor/hooks.json 的 stop 和 beforeSubmitPrompt 里各加一条下面这个命令，然后重开 Cursor。"), "bash ~/.claude/hooks/peon-ping/peon.sh")
+            return (t("小管家已经把钩子登记好了。Codex 出于安全，要你确认一次：打开 Codex，输入 /hooks，找到名字是 stackchan-butler 的那几条，选择信任。"), "/hooks")
         case "OpenCode":
-            return (t("在「终端」里运行下面这条命令，它会给 OpenCode 装一个很小的插件。装好后重开 OpenCode。"), "bash ~/.claude/hooks/peon-ping/adapters/opencode.sh")
-        case "Antigravity":
-            return (t("Antigravity 2 有正式的钩子。小管家带了一个转接脚本，把它登记在 ~/.gemini/config/hooks.json 的 Stop 和 PreInvocation 里（后面加上同名参数），然后重开 Antigravity。"), "sh \"" + AgentHooks.antigravityHookPath + "\" Stop")
+            return (t("OpenCode 暂时还要借 peon-ping 接通：装好 peon-ping 后，在「终端」里运行下面这条命令，它会给 OpenCode 装一个很小的插件。装好后重开 OpenCode。"), "bash ~/.claude/hooks/peon-ping/adapters/opencode.sh")
         default: return ("", "")
         }
     }
@@ -98,7 +93,9 @@ struct AgentHowTo: View {
                 }
             }
             HStack {
-                Button(t("打开 peon-ping 文件夹")) { NSWorkspace.shared.open(URL(fileURLWithPath: Env.peonDir)) }
+                if agent == "OpenCode", Env.peonInstalled {
+                    Button(t("打开 peon-ping 文件夹")) { NSWorkspace.shared.open(URL(fileURLWithPath: Env.peonDir)) }
+                }
                 Spacer()
                 Button(t("好")) { close() }.keyboardShortcut(.defaultAction)
             }
@@ -139,5 +136,56 @@ enum CodexThreads {
         }
         lock.withLock { known[threadId] = sub }
         return sub
+    }
+}
+
+/// 一个 AI 工具的接通状态和按钮（设置「提醒」页、安装向导共用）
+struct AgentConnectControl: View {
+    var agent: String
+    @ObservedObject var model = AppModel.shared
+    @State private var tick = 0
+    @State private var error: String?
+    @State private var howTo = false
+
+    var body: some View {
+        let _ = tick
+        let st = HookInstaller.status(agent)
+        let installed = HookInstaller.installed(agent)
+        HStack(spacing: 8) {
+            switch st {
+            case .connected:
+                Menu {
+                    Button(t("断开")) { run { try HookInstaller.disconnect(agent) } }
+                } label: { statusLabel(.green, t("已接通")) }
+                    .menuStyle(.borderlessButton).fixedSize()
+            case .needsTrust:
+                statusLabel(.orange, t("还差一步"))
+                Button(t("去 Codex 信任…")) { howTo = true }.controlSize(.small)
+            case .viaPeon, .none:
+                if st == .viaPeon { statusLabel(.green, t("经 peon-ping")) }
+                else { statusLabel(.secondary, installed ? t("未接通") : t("没装")) }
+                if HookInstaller.oneClick(agent) && installed {
+                    Button(t("接通")) {
+                        run { try HookInstaller.connect(agent) }
+                        if agent == "Codex", error == nil { howTo = true }      // Codex 还要你信任一次
+                    }.controlSize(.small)
+                } else if agent == "OpenCode" && installed && st == .none {
+                    Button(t("接通…")) { howTo = true }.controlSize(.small)
+                }
+            }
+        }
+        .sheet(isPresented: $howTo) { AgentHowTo(agent: agent) { howTo = false; tick += 1 } }
+        .alert(error ?? "", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) { Button(t("好")) {} }
+    }
+
+    private func statusLabel(_ c: Color, _ s: String) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(c).frame(width: 7, height: 7)
+            Text(s).font(.subheadline).foregroundStyle(.secondary)
+        }
+    }
+    private func run(_ f: () throws -> Void) {
+        do { try f() } catch { self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
+        tick += 1
     }
 }

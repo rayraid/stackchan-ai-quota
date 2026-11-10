@@ -16,27 +16,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
+
+    // 菜单栏图标被系统藏起来、或者被关掉时，在「应用程序」里再双击小管家就弹出设置窗口
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        MainActor.assumeIsolated {
+            if !AppModel.shared.settings.setupDone { Openers.wizard?() } else { Openers.settings?() }
+        }
+        return false
+    }
 }
 
 @main
 struct ButlerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
-    @ObservedObject var model = AppModel.shared
-    @Environment(\.openWindow) private var openWindow
-
     var body: some Scene {
         MenuBarExtra {
             MenuView()
-                .task { if !model.settings.setupDone { openWindow(id: "wizard") } }
         } label: {
             MenuBarLabel()
-                .task { if !model.settings.setupDone { openWindow(id: "wizard") } }
         }
         .menuBarExtraStyle(.window)
 
-        Window(t("设置"), id: "settings") { SettingsView() }
-            .windowResizability(.contentSize)
-            .keyboardShortcut(",")
+        // 标准的设置窗口：顶部工具栏切换各页、标题跟着当前页、⌘, 打开（Apple 设计规范）
+        Settings { SettingsView() }
 
         Window(t("欢迎使用小管家"), id: "wizard") { WizardView() }
             .windowResizability(.contentSize)

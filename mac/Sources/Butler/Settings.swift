@@ -13,6 +13,8 @@ struct AppSettings: Codable, Equatable {
 
     // 屏幕
     var homeStyle = "B"              // 平时首页：A 轻底栏 / B 眼睛就是额度 / C 说给你听 / D 只有脸
+    var listStyle = "A"              // 全部额度页：A 两列小卡片 / B 一行一家 / C 竖条对比
+    var detailStyle = "A"            // 明细页：A 大圆环（周期最短的那个）+ 旁边几行 / B 统一横条
     var theme = "night"              // night / black / warm / light
     var brightness = 70
     var pinned: [String] = ["claude", "codex"]
@@ -37,7 +39,9 @@ struct AppSettings: Codable, Equatable {
     var kindQuestion = true
     var kindDone = true
     var alertLevel = 1               // 0 轻 1 中 2 强
-    var alertSecs = 5                // 提醒画面停多久（秒），0 = 一直到你回去；停完回到平时的脸，彩灯继续亮
+    var alertSecs = 10               // 提醒画面停多久（秒），0 = 一直到你回去；停完回到平时的脸，彩灯继续亮
+    var alertStyle = "now"           // 提醒画面：now 整屏变色（经典）/ B 柔和变色 / C 脸 + 底部卡片
+    var doneFlash = true             // 「做完了」整屏提醒完就熄灯，不留 logo；false 时按 doneTTL
     var remind = 0                   // 分钟，0 = 不再提醒
     var doneTTL = 10                 // 「做完了」多久后熄灯（分钟），0 = 等你回去
     var waitingTTL = 120             // 「要你批准」最多等多久（分钟），0 = 直到处理
@@ -88,6 +92,7 @@ struct AppSettings: Codable, Equatable {
     var macId = ""
     var setupDone = false
     var rev = 1                      // 设置每改一次加 1，机器人据此判断要不要重新应用
+    var migrated = 0                 // 设置迁移到第几版（见 SettingsFile.load）
 }
 
 enum Paths {
@@ -126,6 +131,10 @@ enum SettingsFile {
                let decoded = try? JSONDecoder.iso.decode(AppSettings.self, from: md) {
                 s = decoded
             }
+        }
+        if s.migrated < 22 {             // 2.2：提醒画面默认停 10 秒（原来默认 5 秒的跟着改）
+            if s.alertSecs == 5 { s.alertSecs = 10 }
+            s.migrated = 22
         }
         if s.token.isEmpty { s.token = randomToken() }
         if s.macId.isEmpty { s.macId = randomToken(6).lowercased() }

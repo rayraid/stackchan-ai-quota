@@ -9,6 +9,7 @@
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include <Update.h>
+#include <algorithm>
 
 SemaphoreHandle_t gMux;
 State gState;
@@ -16,6 +17,9 @@ Cfg gCfg;
 volatile bool gOnline = false;
 volatile uint32_t gFetchedAt = 0;
 String gAckId;
+std::vector<String> gClearIds;
+std::vector<String> gClearSend;
+std::vector<String> gDoneSend;
 volatile int gOta = -1;
 bool gDemo = false;
 
@@ -87,7 +91,11 @@ bool parseCfg(JsonVariantConst o, Cfg& c) {
   if (!o.is<JsonObjectConst>()) return false;
   c.rev = o["rev"] | c.rev;
   c.home = (const char*)(o["home"] | c.home.c_str());
+  c.list = (const char*)(o["list"] | c.list.c_str());
+  c.detail = (const char*)(o["detail"] | c.detail.c_str());
   c.alertSecs = o["alert_secs"] | c.alertSecs;
+  c.alertStyle = (const char*)(o["alert_style"] | c.alertStyle.c_str());
+  c.doneFlash = o["done_flash"] | c.doneFlash;
   c.theme = (const char*)(o["theme"] | c.theme.c_str());
   c.eye = (const char*)(o["eye"] | c.eye.c_str());
   c.name = (const char*)(o["name"] | c.name.c_str());
@@ -154,6 +162,7 @@ bool parseState(const String& body, State& s) {
       x.left = w["left"] | 0;
       x.level = (const char*)(w["level"] | "na");
       x.reset = (const char*)(w["reset"] | "");
+      x.mins = w["mins"] | 0;
       x.pace = (const char*)(w["pace"] | "");
       b.wins.push_back(x);
     }
@@ -263,7 +272,11 @@ static bool discover() {
 }
 static String url(const char* path, bool full = false) {
   String u = String("http://") + gBridgeIp.toString() + ":" + String(gBridgePort) + path + "?t=" + gLink.token;
-  if (full) u += "&fw=" FW_VERSION "&rssi=" + String(WiFi.RSSI()) + "&up=" + String(millis() / 1000);
+  if (full) {
+    u += "&fw=" FW_VERSION "&rssi=" + String(WiFi.RSSI()) + "&up=" + String(millis() / 1000);
+    Batt b = battGet();
+    if (b.pct >= 0) u += "&bat=" + String(b.pct) + "&pwr=" + String((int)b.power) + "&bmv=" + String(b.mv) + "&bma=" + String(b.ma);
+  }
   return u;
 }
 
@@ -319,7 +332,23 @@ static void netTask(void*) {
     http.setTimeout(3000);
     xSemaphoreTake(gMux, portMAX_DELAY);
     String ack = gAckId;
+    std::vector<String> toClear = gClearSend, toDone = gDoneSend;
     xSemaphoreGive(gMux);
+    if ((!toClear.empty() || !toDone.empty()) && http.begin(client, url("/clear"))) {   // 摸头熄灯 / 做完了提醒完：告诉小管家删掉这几条
+      JsonDocument d;
+      for (auto& id : toClear) d["ids"].add(id);
+      for (auto& id : toDone) d["done_ids"].add(id);
+      String body;
+      serializeJson(d, body);
+      http.addHeader("Content-Type", "application/json");
+      if (http.POST(body) == 200) {
+        xSemaphoreTake(gMux, portMAX_DELAY);
+        for (auto& id : toClear) for (size_t i = 0; i < gClearSend.size(); i++) if (gClearSend[i] == id) { gClearSend.erase(gClearSend.begin() + i); break; }
+        for (auto& id : toDone) for (size_t i = 0; i < gDoneSend.size(); i++) if (gDoneSend[i] == id) { gDoneSend.erase(gDoneSend.begin() + i); break; }
+        xSemaphoreGive(gMux);
+      }
+      http.end();
+    }
     if (ack.length() && http.begin(client, url("/ack"))) {
       JsonDocument d;
       d["id"] = ack;
@@ -341,6 +370,17 @@ static void netTask(void*) {
         State s;
         if (parseState(body, s) && !gDemo) {
           xSemaphoreTake(gMux, portMAX_DELAY);
+          // 摸头熄掉的：小管家那边已经没有了就忘掉；还有（消息还没到、或者正好错开）就先不显示，免得又亮又闪
+          for (size_t i = 0; i < gClearIds.size();) {
+            bool there = false;
+            for (auto& w : s.waiting) if (w.id == gClearIds[i]) there = true;
+            if (there || std::find(gClearSend.begin(), gClearSend.end(), gClearIds[i]) != gClearSend.end()
+                || std::find(gDoneSend.begin(), gDoneSend.end(), gClearIds[i]) != gDoneSend.end()) i++;
+            else gClearIds.erase(gClearIds.begin() + i);
+          }
+          s.waiting.erase(std::remove_if(s.waiting.begin(), s.waiting.end(), [](const Wait& w) {
+            return std::find(gClearIds.begin(), gClearIds.end(), w.id) != gClearIds.end();
+          }), s.waiting.end());
           gState = s;
           if (s.hasCfg) gCfg = s.cfg;
           gFetchedAt = millis();

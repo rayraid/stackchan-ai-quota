@@ -5,9 +5,9 @@
 #include <ArduinoJson.h>
 #include <vector>
 
-#define FW_VERSION "2.1.0"
+#define FW_VERSION "2.1.2"
 
-struct Win  { String label, level, reset, pace; int left = 0; };
+struct Win  { String label, level, reset, pace; int left = 0; int mins = 0; };   // mins：这个额度的周期（分钟），0 = 不知道
 struct Sub  { String id, name, mono, label, level, reset, error, icon; uint32_t hue = 0xaab2bd; int left = -1; bool stale = false; std::vector<Win> wins; };
 struct Wait { String id, agent, mono, project, kind, text, iconId, iconV; uint32_t since = 0; bool acked = false; };
 struct Low  { String id, name, label, reset; int left = 0; };
@@ -16,7 +16,11 @@ struct Low  { String id, name, label, reset; int left = 0; };
 struct Cfg {
   int rev = -1;
   String home = "B";        // 首页样式：A 轻底栏 / B 眼睛就是额度 / C 说给你听 / D 只有脸
-  int alertSecs = 5;        // 整屏提醒停几秒，0 = 一直到你回去
+  String list = "A";        // 全部额度页：A 两列小卡片 / B 一行一家 / C 竖条对比
+  String detail = "A";      // 明细页：A 大圆环（周期最短的那个）+ 旁边几行 / B 统一横条
+  int alertSecs = 10;       // 整屏提醒停几秒，0 = 一直到你回去
+  String alertStyle = "now"; // 提醒画面：now 整屏变色 / B 柔和变色 / C 脸 + 底部卡片
+  bool doneFlash = true;    // 「做完了」整屏提醒完就熄（不留 logo 和灯）
   String theme = "night", eye = "capsule", name = "StackChan", lang = "zh";
   uint32_t eyeColor = 0; bool eyeColorSet = false;
   int bright = 70;
@@ -53,6 +57,9 @@ extern Cfg gCfg;                  // 当前生效的设置（受 gMux 保护，�
 extern volatile bool gOnline;
 extern volatile uint32_t gFetchedAt;
 extern String gAckId;             // 要告诉小管家「已知道」的那一条（受 gMux 保护，空 = 没有）
+extern std::vector<String> gClearIds;   // 摸头熄掉的提醒（受 gMux 保护）：小管家删掉之前，收到的状态里先把它们去掉
+extern std::vector<String> gClearSend;  // 还没告诉小管家的那几条（受 gMux 保护）
+extern std::vector<String> gDoneSend;   // 「做完了」提醒完自己熄掉的，还没告诉小管家的（受 gMux 保护）
 extern volatile int gOta;         // 升级进度：-1 没在升级，0~100 进行中，-2 失败
 extern bool gDemo;
 void netBegin();
@@ -81,10 +88,12 @@ struct UiCtx {
   int otaProgress = -1;
   bool portal = false;
   String ssid;
+  int batt = -1;           // 电量百分比，-1 = 读不到（首页左上角用）
+  bool power = false;      // 插着线（正在充电或已充满）
 };
 void uiBegin();
 void uiRender(const State& s, const Cfg& c, Mode m, const UiCtx& u);
-int uiListHit(const State& s, int y);   // 明细列表里点到第几行，没点到返回 -1
+int uiListHit(const State& s, const Cfg& c, int x, int y);   // 全部额度页点到第几家，没点到返回 -1（-2 = 顶部标题栏）
 // 首页上点了哪里：返回 true 并给出订阅 id = 看那一家的明细；false = 进「全部额度」
 bool uiFaceHit(const State& s, const Cfg& c, int x, int y, String& subId);
 extern M5Canvas cv;
@@ -94,3 +103,8 @@ void bodyUpdate(const State& s, const Cfg& c, Mode m, int flashSeq);   // flashS
 void bodyDo(const String& what, const Cfg& c);   // nod / shake / chime / find / droop / idle / wiggle
 void bodyNoteActivity();
 uint32_t bodyLastActivity();
+// 电池：身体里的 INA226 测电压和电流（放电为正、充电为负），每秒读一次
+struct Batt { int pct = -1; bool power = false; int mv = 0, ma = 0; };
+void battUpdate();
+Batt battGet();                       // 主循环和联网任务都能调用
+bool battSerial(const String& cmd);   // 串口：batt 15 / batt 64 chg / batt real（截图用）
