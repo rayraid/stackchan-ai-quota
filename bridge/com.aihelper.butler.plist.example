@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 开机自启模板：把两处 /path/to/aihelper 换成你的实际路径，
+     存为 ~/Library/LaunchAgents/com.aihelper.butler.plist，然后运行：
+     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.aihelper.butler.plist -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.aihelper.butler</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/path/to/aihelper/bridge/butler.py</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/path/to/aihelper/bridge</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>/tmp/aihelper-butler.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/aihelper-butler.log</string>
+</dict>
+</plist>

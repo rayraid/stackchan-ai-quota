@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 额度小摆件方案</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  /* 布局：控制条在上，三台设备并排对比，下面依次是调研结论、工作方式、步骤、待确认 */
+  --bg:#edf0f3; --surface:#ffffff; --ink:#18212c; --muted:#5a6675; --line:#d4dae1;
+  --accent:#1f5fd6; --accent-ink:#ffffff; --desk:#e3e7ec;
+  --shell:#f6f7f9; --shell-edge:#c3cad3;
+  --good:#18864b; --warn:#9a6500; --bad:#c23535;
+  --font-body:"PingFang SC","Hiragino Sans GB","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
+  --font-num:"Rajdhani","DIN Alternate","PingFang SC",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#11151b; --surface:#192029; --ink:#e7ebf0; --muted:#98a3b1; --line:#2b333f;
+    --accent:#74a4ff; --accent-ink:#0b1220; --desk:#0d1116;
+    --shell:#d3d8df; --shell-edge:#8f98a4;
+    --good:#4cc98a; --warn:#e2a93b; --bad:#f07070;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#11151b; --surface:#192029; --ink:#e7ebf0; --muted:#98a3b1; --line:#2b333f;
+  --accent:#74a4ff; --accent-ink:#0b1220; --desk:#0d1116;
+  --shell:#d3d8df; --shell-edge:#8f98a4;
+  --good:#4cc98a; --warn:#e2a93b; --bad:#f07070;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 var(--font-body)}
+.wrap{max-width:1180px;margin:0 auto;padding:28px 20px 64px;display:flex;flex-direction:column;gap:30px}
+h1{font-size:26px;line-height:1.25;margin:0;font-weight:700;text-wrap:balance}
+h2{font-size:19px;line-height:1.3;margin:0;text-wrap:balance}
+h3{font-size:16px;margin:0}
+p{margin:0}
+a{color:var(--accent)}
+.lede{color:var(--muted);max-width:66ch;margin-top:8px}
+.sec{display:flex;flex-direction:column;gap:12px}
+.sec>p{max-width:68ch}
+.muted{color:var(--muted)}
+
+/* 控制条 */
+.controls{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:flex;flex-wrap:wrap;gap:12px 22px;align-items:center}
+.ctl{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ctl-l{font-size:13px;color:var(--muted)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;flex-wrap:wrap}
+.seg button{appearance:none;border:0;border-right:1px solid var(--line);background:transparent;color:var(--ink);font:inherit;font-size:14px;padding:6px 12px;cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);font-weight:600}
+.ghost{appearance:none;border:1px solid var(--line);background:transparent;color:var(--ink);font:inherit;font-size:14px;padding:6px 12px;border-radius:9px;cursor:pointer}
+button:focus-visible,.screen:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.ctl.dim{opacity:.4}
+.react{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.react div{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:14px}
+.react b{display:block;font-size:12px;color:var(--muted);font-weight:400}
+.datanote{font-size:13px;color:var(--muted)}
+
+/* 三台设备 */
+.board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+.opt{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.opt-h{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.tag{font:700 20px/1 var(--font-num);color:var(--accent)}
+.opt-h p{flex-basis:100%;font-size:14px;color:var(--muted)}
+.stage{background:var(--desk);border-radius:10px;padding:18px 0 14px;display:flex;justify-content:center;perspective:900px;overflow:hidden}
+.robot{width:374px;display:flex;flex-direction:column;align-items:center;flex:none}
+.head{width:374px;background:var(--shell);border:1px solid var(--shell-edge);border-radius:22px;padding:14px 14px 30px;position:relative;transform-origin:50% 100%;box-shadow:0 6px 14px rgba(20,30,45,.16)}
+.head::after{content:"";position:absolute;left:50%;bottom:10px;width:10px;height:10px;margin-left:-5px;border-radius:50%;background:#2a313b}
+.bezel{background:#05070a;border-radius:10px;padding:12px}
+.neck{width:74px;height:14px;background:var(--shell-edge)}
+.base{width:252px;height:50px;border-radius:12px 12px 16px 16px;background:var(--shell);border:1px solid var(--shell-edge);display:grid;place-items:center}
+.leds{display:grid;grid-template-columns:repeat(6,12px);gap:5px 9px}
+.leds i{width:12px;height:6px;border-radius:3px;background:#aeb6c0}
+.robot[data-led="ok"] .leds i{background:#3ddc84;opacity:.5}
+.robot[data-led="attn"] .leds i{background:#ffb020;animation:breathe 2.4s ease-in-out infinite}
+.robot[data-led="attn-dim"] .leds i{background:#ffb020;opacity:.55}
+.robot[data-led="flash"] .leds i{background:#ffb020;animation:breathe .5s steps(2,end) infinite}
+.robot[data-led="bad"] .leds i{background:#ff5d5d}
+.robot[data-move="nod"] .head{animation:nod 1.3s ease-in-out 1}
+.robot[data-move="shake"] .head{animation:shake 1.1s ease-in-out infinite}
+.robot[data-move="shake1"] .head{animation:shake1 1.7s ease-in-out 1}
+.robot[data-move="droop"] .head{transform:rotateX(-18deg)}
+@keyframes breathe{0%,100%{opacity:.25}50%{opacity:1}}
+@keyframes nod{0%,100%{transform:rotateX(0)}25%{transform:rotateX(-13deg)}55%{transform:rotateX(8deg)}80%{transform:rotateX(-4deg)}}
+@keyframes shake{0%,100%{transform:rotateY(-12deg)}50%{transform:rotateY(12deg)}}
+@keyframes shake1{0%,100%{transform:rotateY(0)}25%{transform:rotateY(-13deg)}75%{transform:rotateY(13deg)}}
+.facts{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:14px;margin:0}
+.facts dt{color:var(--muted);white-space:nowrap}
+.facts dd{margin:0}
+
+/* ===== 设备屏幕：固定 320×240，自带一套深色配色，不跟随页面主题 ===== */
+.screen{width:320px;height:240px;position:relative;overflow:hidden;background:#0b0e13;color:#e9edf2;font-family:var(--font-body);cursor:pointer;user-select:none;-webkit-user-select:none}
+.screen b{font-weight:600}
+.lv-ok{--lv:#3ddc84}.lv-mid{--lv:#f5c542}.lv-low{--lv:#ff5d5d}.lv-na{--lv:#59636f}
+.chip{flex:none;width:24px;height:24px;border-radius:6px;background:var(--h);color:#0b0e13;font:700 12px/1 var(--font-num);display:grid;place-items:center;letter-spacing:.02em}
+.bar{height:8px;border-radius:4px;background:#252c37;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:4px;background:var(--lv)}
+.wb{display:inline-flex;align-items:center;gap:5px;font-size:12px;line-height:1;padding:4px 8px;border-radius:10px;background:#3a2a05;color:#ffcf6b;white-space:nowrap}
+.wb::before{content:"";width:6px;height:6px;border-radius:50%;background:#ffb020}
+
+/* A 表情 */
+.A{position:absolute;inset:0}
+.A>.wb{position:absolute;right:8px;top:8px}
+.face{position:absolute;left:0;right:0;top:26px;height:150px}
+.A.has-bub .face{top:54px}
+.eye{position:absolute;top:46px;width:22px;height:22px;border-radius:50%;background:#f2f5f8;animation:blink 4.6s infinite}
+.eye.l{left:96px}.eye.r{right:96px}
+.mouth{position:absolute;left:50%;top:108px;width:56px;height:5px;margin-left:-28px;border-radius:3px;background:#f2f5f8}
+.face.alert .eye{width:30px;height:30px;top:42px;animation:none}
+.face.alert .eye.l{left:92px}.face.alert .eye.r{right:92px}
+.face.alert .mouth{width:20px;height:20px;margin-left:-10px;top:100px;border-radius:50%;background:none;border:4px solid #f2f5f8}
+.face.worry .mouth{width:34px;margin-left:-17px;transform:rotate(-7deg)}
+.face.sleep .eye{width:26px;height:4px;top:56px;border-radius:2px;animation:none}
+.face.sleep .mouth{width:16px;margin-left:-8px}
+.face.done .eye{width:30px;height:30px;top:44px;background:none;border:5px solid transparent;border-top-color:#f2f5f8;animation:none}
+.face.done .eye.l{left:92px}.face.done .eye.r{right:92px}
+.face.done .mouth{width:52px;height:52px;margin-left:-26px;top:70px;border-radius:50%;background:none;border:5px solid transparent;border-bottom-color:#f2f5f8}
+.mark{position:absolute;right:58px;top:20px;font:700 32px/1 var(--font-num);color:#ffb020}
+.gal{display:flex;flex-wrap:wrap;gap:14px}
+.gal figure{margin:0;display:flex;flex-direction:column;gap:6px;font-size:14px}
+.gal figcaption small{display:block;color:var(--muted);font-size:13px}
+.gal .screen{zoom:.5;cursor:default;border-radius:14px}
+.gal .face{top:45px}
+.sweat{position:absolute;right:66px;top:28px;width:10px;height:15px;background:#6ec1ff;border-radius:50% 50% 50% 50%/65% 65% 35% 35%}
+.zz{position:absolute;right:70px;top:16px;font:600 18px/1 var(--font-num);color:#8b95a3;letter-spacing:.2em}
+@keyframes blink{0%,94%,100%{transform:scaleY(1)}97%{transform:scaleY(.1)}}
+.bub{position:absolute;left:10px;right:10px;top:8px;padding:6px 12px 7px;border-radius:12px;background:var(--bb);color:var(--bt)}
+.bub::after{content:"";position:absolute;left:50%;bottom:-7px;margin-left:-7px;border:7px solid transparent;border-bottom:0;border-top-color:var(--bb)}
+.bub b{display:block;font-size:16px;line-height:1.3}
+.bub span{display:block;font-size:12px;line-height:1.35}
+.attn{--bb:#ffb020;--bt:#1b1300}.bad{--bb:#ff5d5d;--bt:#200505}.mute{--bb:#39424e;--bt:#e9edf2}
+.strip{position:absolute;left:10px;right:10px;bottom:10px;display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.cell{display:grid;grid-template-columns:auto 1fr;align-items:baseline;row-gap:3px}
+.cell b{font:600 12px/1 var(--font-num);letter-spacing:.04em;color:#8b95a3}
+.cell em{font:700 18px/1 var(--font-num);font-style:normal;text-align:right;color:var(--lv)}
+.cell .mini{grid-column:1/-1;height:5px;border-radius:3px;background:#252c37;overflow:hidden}
+.cell .mini i{display:block;height:100%;border-radius:3px;background:var(--lv)}
+.hint{position:absolute;left:12px;right:12px;bottom:10px;display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#b9c1cc}
+
+/* B 仪表盘 */
+.B{position:absolute;inset:0;display:flex;flex-direction:column;padding:6px 10px 6px}
+.bh{flex:none;height:26px;display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#8b95a3}
+.bh>span:first-child{font:600 16px/1 var(--font-num);color:#c9d0d9}
+.sync::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:#3ddc84;margin-right:5px}
+.ban{flex:none;margin:-6px -10px 2px;padding:6px 10px 7px;background:var(--bb);color:var(--bt)}
+.ban b{display:block;font-size:15px;line-height:1.3}
+.ban span{display:block;font-size:12px;line-height:1.35}
+.rows{flex:1;display:grid;grid-auto-rows:1fr;min-height:0}
+.row{display:grid;grid-template-columns:24px minmax(0,1fr) 78px 44px;gap:8px;align-items:center;border-top:1px solid #1c222b}
+.nm{font-size:14px;line-height:1.2;white-space:nowrap;overflow:hidden}
+.nm small{display:block;font-size:11px;color:#8b95a3}
+.pc{font:700 21px/1 var(--font-num);text-align:right;color:var(--lv)}
+.pc small{font-size:12px;color:#8b95a3;margin-left:1px}
+.stale .rows,.stale .big,.stale .others{opacity:.55}
+
+/* 明细页 */
+.D{position:absolute;inset:0;padding:8px 12px;display:flex;flex-direction:column;gap:4px}
+.dh{flex:none;display:flex;align-items:center;gap:8px;font-size:15px}
+.dh small{font-size:12px;color:#8b95a3}
+.back{margin-left:auto;font-size:12px;color:#8b95a3}
+.wins{flex:1;display:grid;grid-auto-rows:1fr;min-height:0}
+.win{display:grid;grid-template-columns:1fr auto;align-content:center;gap:2px 8px;border-top:1px solid #1c222b}
+.wl{font-size:13px}
+.wp{font:700 18px/1 var(--font-num);color:var(--lv)}
+.wp small{font-size:11px;color:#8b95a3}
+.win .bar{grid-column:1/-1;height:6px}
+.wr{grid-column:1/-1;font-size:11px;color:#8b95a3;line-height:1.3}
+.derr{align-self:center;display:flex;flex-direction:column;gap:6px}
+.derr b{font-size:16px;color:#ffcf6b}
+.derr span{font-size:12px;line-height:1.5;color:#b9c1cc}
+
+/* C 轮播 */
+.C{position:absolute;inset:0;padding:10px 14px;display:flex;flex-direction:column}
+.ch{display:flex;align-items:center;gap:8px;font-size:16px}
+.ch small{margin-left:auto;font-size:12px;color:#8b95a3}
+.ch .wb{margin-left:auto}
+.big{display:flex;align-items:baseline;gap:4px;margin-top:6px}
+.big b{font:700 76px/.92 var(--font-num);color:var(--lv)}
+.big span{font:600 26px/1 var(--font-num);color:var(--lv)}
+.big em{font-style:normal;font-size:13px;color:#8b95a3;margin-left:8px}
+.cbar{height:10px;border-radius:5px;margin-top:6px}
+.others{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.others span{font-size:12px;line-height:1;padding:4px 7px;border-radius:9px;background:#171c24;color:#c5ccd6}
+.cerr{font-size:13px;line-height:1.5;color:#b9c1cc;margin-top:6px}
+.cf{margin-top:auto;display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;color:#8b95a3}
+.dots{flex:none}
+.dots i{display:inline-block;width:6px;height:6px;border-radius:50%;background:#39424e;margin-left:4px}
+.dots i.on{background:#e9edf2}
+.C.takeover{background:#ffb020;color:#1b1300}
+.C.takeover .ctop{display:flex;align-items:center;justify-content:space-between;font-size:12px}
+.C.takeover .t1{font-size:24px;font-weight:700;line-height:1.2;margin-top:14px}
+.C.takeover .t2{font-size:24px;line-height:1.25}
+.C.takeover .t3{font-size:14px;margin-top:8px}
+.C.takeover .cf{color:#3d2c00}
+.C.takeover .chip{background:#1b1300;color:#ffb020}
+
+/* 下半页 */
+.tbl{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:14px}
+th,td{text-align:left;vertical-align:top;padding:10px 14px;border-top:1px solid var(--line)}
+thead th{border-top:0;font-size:13px;font-weight:400;color:var(--muted)}
+td:first-child{white-space:nowrap;font-weight:600}
+.pill{display:inline-block;font-size:12px;line-height:1;padding:4px 8px;border-radius:10px;border:1px solid currentColor;white-space:nowrap}
+.pill.y{color:var(--good)}.pill.h{color:var(--warn)}.pill.n{color:var(--bad)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:14px;display:flex;flex-direction:column;gap:4px}
+.card b{font-size:15px}
+.card .use{color:var(--muted)}
+.callout{border-left:3px solid var(--accent);padding:2px 0 2px 14px;max-width:68ch}
+.flow{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:10px;align-items:center}
+.fstack{display:flex;flex-direction:column;gap:10px}
+.fbox{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:14px}
+.fbox b{display:block;font-size:15px}
+.fbox.main{border-color:var(--accent)}
+.farrow{font:600 13px/1.2 var(--font-num);color:var(--muted);text-align:center;white-space:nowrap}
+.farrow::after{content:"→";display:block;font-size:22px}
+.steps{list-style:none;margin:0;padding:0;display:grid;gap:10px;counter-reset:st}
+.steps li{counter-increment:st;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px 12px 52px;position:relative;font-size:14px}
+.steps li::before{content:counter(st);position:absolute;left:16px;top:10px;font:700 24px/1.2 var(--font-num);color:var(--accent)}
+.steps b{display:block;font-size:15px}
+.steps .see{color:var(--muted)}
+.todo{margin:0;padding-left:20px;max-width:70ch;display:grid;gap:6px}
+
+@media (max-width:760px){
+  .board{grid-template-columns:1fr}
+  .react{grid-template-columns:1fr}
+  .flow{grid-template-columns:1fr}
+  .farrow::after{content:"↓"}
+}
+@media (prefers-reduced-motion:reduce){
+  .robot .head,.leds i,.eye{animation:none!important}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>桌面 AI 额度小摆件：三种屏幕风格</h1>
+  <p class="lede">先在下面切换场景，再对比三种风格在同一场景下的样子。点屏幕等于在真机上点触摸屏。我按 M5Stack StackChan 来画：2 英寸 320×240 触摸屏，头能左右转、上下点，带彩灯和喇叭。最终做进固件的是 A 表情优先，提醒强度是「中」；B 和 C 留在这里作对照。</p>
+</header>
+
+<section class="sec" aria-label="演示控制">
+  <div class="controls">
+    <div class="ctl"><span class="ctl-l">场景</span>
+      <div class="seg" id="seg-scn">
+        <button type="button" id="scn-real" data-scn="real" aria-pressed="true">平时</button>
+        <button type="button" id="scn-ask" data-scn="ask" aria-pressed="false">AI 等你回复</button>
+        <button type="button" id="scn-low" data-scn="low" aria-pressed="false">额度快用完</button>
+        <button type="button" id="scn-off" data-scn="off" aria-pressed="false">连不上 Mac</button>
+      </div>
+    </div>
+    <div class="ctl dim" id="ctl-level"><span class="ctl-l">提醒强度</span>
+      <div class="seg" id="seg-level">
+        <button type="button" id="lv-light" data-level="light" aria-pressed="false">轻</button>
+        <button type="button" id="lv-mid" data-level="mid" aria-pressed="true">中</button>
+        <button type="button" id="lv-strong" data-level="strong" aria-pressed="false">强</button>
+      </div>
+    </div>
+    <div class="ctl dim" id="ctl-ask"><span class="ctl-l">等你做什么</span>
+      <div class="seg" id="seg-ask">
+        <button type="button" id="ask-approval" data-ask="approval" aria-pressed="true">要你批准</button>
+        <button type="button" id="ask-done" data-ask="done" aria-pressed="false">做完了</button>
+      </div>
+    </div>
+    <div class="ctl"><span class="ctl-l">大小</span>
+      <div class="seg" id="seg-size">
+        <button type="button" id="sz-fit" data-size="fit" aria-pressed="true">放大看</button>
+        <button type="button" id="sz-real" data-size="real" aria-pressed="false">接近实物</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <button type="button" class="ghost" id="btn-replay">重播动作</button>
+      <button type="button" class="ghost" id="btn-chime">试听提示音</button>
+    </div>
+  </div>
+  <div class="react" aria-live="polite">
+    <div><b>头</b><span id="r-head"></span></div>
+    <div><b>灯</b><span id="r-led"></span></div>
+    <div><b>声音</b><span id="r-snd"></span></div>
+  </div>
+  <p class="datanote" id="datanote"></p>
+</section>
+
+<section class="board" aria-label="三种风格">
+  <article class="opt">
+    <div class="opt-h"><span class="tag">A</span><h3>表情优先</h3><p>平时是一张脸，额度缩成底部 5 根小条；有事时脸变、头顶冒气泡。</p></div>
+    <div class="stage"><div class="robot"><div class="head"><div class="bezel"><div class="screen" id="scrA" role="button" tabindex="0" aria-label="A 风格屏幕，点击切换页面"></div></div></div><div class="neck"></div><div class="base"><div class="leds"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div></div>
+    <dl class="facts">
+      <dt>好处</dt><dd>最像桌宠。它一变脸，余光就知道有事找你。</dd>
+      <dt>代价</dt><dd>平时只看得到大概，细节要点一下屏幕。</dd>
+      <dt>点屏幕</dt><dd>在脸和明细列表之间切换。</dd>
+      <dt>缩写</dt><dd>CX Codex、CL Claude、CU Cursor、OC OpenCode、AG Antigravity</dd>
+    </dl>
+  </article>
+  <article class="opt">
+    <div class="opt-h"><span class="tag">B</span><h3>仪表盘优先</h3><p>5 个订阅排成一张表，每行显示最紧张的那个额度；有事时顶部出横幅。</p></div>
+    <div class="stage"><div class="robot"><div class="head"><div class="bezel"><div class="screen" id="scrB" role="button" tabindex="0" aria-label="B 风格屏幕，点击某一行看明细"></div></div></div><div class="neck"></div><div class="base"><div class="leds"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div></div>
+    <dl class="facts">
+      <dt>好处</dt><dd>不用碰它，所有订阅的剩余量一眼看全。</dd>
+      <dt>代价</dt><dd>像仪表不像桌宠。字偏小，隔远了要凑近。</dd>
+      <dt>点某一行</dt><dd>看这个订阅的全部额度窗口，再点返回。</dd>
+    </dl>
+  </article>
+  <article class="opt">
+    <div class="opt-h"><span class="tag">C</span><h3>轮播卡片</h3><p>一屏只放一个订阅，数字很大，自动翻页；有事时整屏变成提醒卡。</p></div>
+    <div class="stage"><div class="robot"><div class="head"><div class="bezel"><div class="screen" id="scrC" role="button" tabindex="0" aria-label="C 风格屏幕，点击看下一张"></div></div></div><div class="neck"></div><div class="base"><div class="leds"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div></div>
+    <dl class="facts">
+      <dt>好处</dt><dd>字最大，隔着桌子也读得清。</dd>
+      <dt>代价</dt><dd>一次只看一个，要等它翻到。真机 8 秒一张，这里加速到 4 秒。</dd>
+      <dt>点屏幕</dt><dd>翻到下一张。</dd>
+    </dl>
+  </article>
+</section>
+
+<section class="sec">
+  <h2>A 风格的全部表情</h2>
+  <p>「做完了」和「要你批准」是两张不同的脸：做完了是笑脸，要你批准是睁大眼加感叹号。气泡、灯和动作两种情况相同。</p>
+  <div class="gal" id="gal"></div>
+</section>
+
+<section class="sec">
+  <h2>CodexBar 能拿到「AI 在等你」的信号吗</h2>
+  <p>能拿到一半。下面是用 CodexBar 0.84 的命令行实测的结果。</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>我们需要的</th><th>结论</th><th>实测情况</th></tr></thead>
+      <tbody>
+        <tr><td>各订阅剩余额度</td><td><span class="pill y">能</span></td><td>启用的订阅，命令行都能读到。Claude 起初读不到，在钥匙串里给命令行授权一次后解决。</td></tr>
+        <tr><td>额度快用完、已重置</td><td><span class="pill y">能</span></td><td>自带额度事件功能，默认关闭。打开后在快用完、用完、重置时会主动通知。</td></tr>
+        <tr><td>把数据送到局域网</td><td><span class="pill y">能</span></td><td>自带一个小型网页服务，设备可以直接来取数，需要设口令。</td></tr>
+        <tr><td>哪个 AI 在等你回复</td><td><span class="pill h">一半</span></td><td>有会话列表，但只分「在干活」和「空闲」两种状态，只认 Claude Code 和 Codex。分不出「卡在等你授权」，也看不到 Cursor、OpenCode、Antigravity。</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="callout">所以额度全部交给 CodexBar，「等你回复」交给第二个工具 peon-ping。两个工具加一个小管家，已经接通并实测过。</p>
+</section>
+
+<section class="sec">
+  <h2>GitHub 上有没有现成的</h2>
+  <p>有不少相近的，但没有一个同时做到三件事：读 CodexBar 的多家额度、接多种 AI 的提醒、让 StackChan 动起来。可以借的部分如下。</p>
+  <div class="cards">
+    <div class="card"><b><a href="https://github.com/PeonPing/peon-ping">peon-ping</a></b><span>给 20 多种 AI 工具接了「做完了」和「需要你输入」两类信号，用来播音效。MIT 协议，约 5 千星。</span><span class="use">直接用它：已经装上并静音，由它盯住各个 AI 工具，把信号转给小管家。</span></div>
+    <div class="card"><b><a href="https://github.com/zxkill/agentface32">agentface32</a></b><span>ESP32 小屏上显示多个 AI 的状态脸，参考机型是同样 320×240 的 M5Stack Basic。MIT 协议。不显示额度，不会动。</span><span class="use">借它：电脑把信号发给设备的做法。</span></div>
+    <div class="card"><b><a href="https://lilting.ch/en/articles/m5stack-cores3-stackchan-agent-notify">StackChan 提醒实战记录</a></b><span>有人让 StackChan 在 Claude Code、Codex、Antigravity 做完任务时转头说话。没公开源码。</span><span class="use">借它：踩过的坑。比如 Claude Code 空闲 60 秒会重复提醒，要过滤掉。</span></div>
+    <div class="card"><b><a href="https://github.com/Chaoyi-Z/m5-stopwatch">m5-stopwatch</a>、<a href="https://github.com/HamalStar/Codey">Codey</a>、<a href="https://github.com/HermannBjorgvin/Clawdmeter">Clawdmeter</a></b><span>在 ESP32 小屏上显示 Claude（有的加 Codex）的额度。只认一两家，不走 CodexBar。</span><span class="use">借它：小屏上额度条的排版思路。</span></div>
+  </div>
+</section>
+
+<section class="sec">
+  <h2>它怎么工作</h2>
+  <div class="flow">
+    <div class="fstack">
+      <div class="fbox"><b>CodexBar</b>提供各订阅的剩余额度</div>
+      <div class="fbox"><b>peon-ping</b>盯住各个 AI 工具，谁在等你授权、提问或做完了，就发一个信号</div>
+    </div>
+    <div class="farrow">本机</div>
+    <div class="fbox main"><b>Mac 上的小管家</b>一个后台小程序。每隔几分钟问一次 CodexBar，随时接收「等你回复」信号，整理成一份很小的状态。</div>
+    <div class="farrow">WiFi</div>
+    <div class="fbox"><b>StackChan</b>只负责显示、转头、亮灯、出声。你摸它的头，它把「知道了」传回去。</div>
+  </div>
+</section>
+
+<section class="sec">
+  <h2>实施步骤</h2>
+  <ol class="steps">
+    <li><b>先做 Mac 上的小管家，不碰硬件（已完成）</b>读 CodexBar 的额度，接上 peon-ping 的「等你回复」信号，做了一个用真实数据驱动的模拟器。<span class="see"> 现在能看到：小管家运行时，在运行小管家的 Mac 上打开 http://127.0.0.1:8787/ ，假设备跟着真实情况变。</span></li>
+    <li><b>设备固件第一版（已完成）</b>装好开发工具，设备连上了 WiFi，画出 A 风格的全部画面，显示真实额度。<span class="see"> 现在能看到：真机屏幕上是各家订阅的真实额度。</span></li>
+    <li><b>提醒动作（已完成）</b>点头、摇头、彩灯、提示音，以及摸头表示「知道了」。<span class="see"> 现在能看到：Claude Code 一问你，它就点头、亮琥珀色灯、响一声。</span></li>
+    <li><b>接入其余 AI</b>Claude Code 已接通。Codex、Cursor、OpenCode、Antigravity 在 peon-ping 里逐个打开，每个单独验证。<span class="see"> 做完能看到：任何一个在等，它都知道。</span></li>
+    <li><b>收尾</b>开机自动运行、夜间静音、断线时的表现、屏幕亮度。</li>
+  </ol>
+</section>
+
+<section class="sec">
+  <h2>已知问题和待确认</h2>
+  <ul class="todo">
+    <li>5 家额度都由 CodexBar 命令行读取，每 5 分钟一次。读 Claude 靠的是 Claude 桌面版的登录状态，所以 Claude 桌面版要保持登录。某一家命令行读不到时，会用 CodexBar 应用写出的共享文件顶上。</li>
+    <li>peon-ping 本来是播放游戏音效的工具，现在音量调成了 0，只保留信号。不要用它的「暂停」功能，那会连信号一起停掉。</li>
+    <li>Antigravity 的「等你回复」信号最不确定。开源做法是读它的日志文件来推断，准确度要实测。</li>
+    <li>我们自己没有加钩子，钩子是 peon-ping 安装时登记的。它只追加自己的条目，不会动其他工具已有的钩子。</li>
+    <li>设备要和 Mac 在同一个 WiFi。Mac 睡着时设备会显示「连不上 Mac」。</li>
+    <li>真机上的字比这页原型里的大。屏幕只有 2 英寸，实际用过后把字整体放大了，列表页因此不再显示恢复时间，气泡第二行改成原因在前、项目名在后。</li>
+    <li>提醒强度目前固定是「中」，「轻」和「强」还没有做成可切换；夜间静音和屏幕亮度也还没做。</li>
+  </ul>
+</section>
+
+</div>
+<script>
+(function(){
+  var $=function(s,r){return (r||document).querySelector(s)};
+  var $$=function(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))};
+  var S={askKind:'approval',scn:'real',level:'mid',acked:false,size:'fit',pageA:0,detailB:null,idxC:0,t0:Date.now()-42000};
+
+  // 示例数据（left = 剩余百分比）
+  var BASE=[
+    {id:'codex',mono:'CX',name:'Codex',plan:'',hue:'#7c9cff',wins:[{l:'本月',left:98,reset:'12月9日重置'}]},
+    {id:'claude',mono:'CL',name:'Claude',plan:'',hue:'#e08a63',wins:[{l:'5小时',left:79,reset:'17:30 恢复'},{l:'本周',left:94,reset:'周四重置'}]},
+    {id:'cursor',mono:'CU',name:'Cursor',plan:'',hue:'#cfd4dc',wins:[{l:'本周',left:98,reset:'今晚 21:12 重置'}]},
+    {id:'opencode',mono:'OC',name:'OpenCode Go',plan:'',hue:'#5fd3bc',wins:[
+      {l:'5小时',left:100,reset:'17:54 重置'},
+      {l:'本周',left:85,reset:'下周一重置'},
+      {l:'本月',left:71,reset:'12月7日重置',pace:'照现在的速度 6 天后用完'}]},
+    {id:'anti',mono:'AG',name:'Antigravity',plan:'',hue:'#b28cff',wins:[
+      {l:'Gemini 5小时',left:83,reset:'15:16 恢复'},
+      {l:'Gemini 本周',left:63,reset:'周六重置'},
+      {l:'Claude/GPT 5小时',left:100,reset:'19:47 恢复'},
+      {l:'Claude/GPT 本周',left:73,reset:'周日重置'}]}
+  ];
+  var WAIT=[
+    {kind:'approval',tool:'Claude Code',mono:'CL',hue:'#e08a63',proj:'aihelper',why:'需要你批准：Bash'},
+    {kind:'done',tool:'Codex',mono:'CX',hue:'#7c9cff',proj:'另一个项目',why:'做完了，等你看结果'}
+  ];
+
+  function waits(){ return S.askKind==='done'?[WAIT[1],WAIT[0]]:WAIT; }
+  function faceInner(expr,mark){
+    return '<div class="face '+expr+'"><i class="eye l"></i><i class="eye r"></i><i class="mouth"></i>'+
+      (expr==='sleep'?'<span class="zz">zz</span>':'')+(expr==='worry'?'<i class="sweat"></i>':'')+(mark?'<span class="mark">'+mark+'</span>':'')+'</div>';
+  }
+  function subs(){
+    var d=JSON.parse(JSON.stringify(BASE));
+    if(S.scn!=='real'){
+      /* 演示场景沿用同一组示例额度 */
+    }
+    if(S.scn==='low'){ d[4].wins[0]={l:'Gemini 5小时',left:8,reset:'1小时08分后恢复'}; }
+    return d;
+  }
+  function tight(s){ if(s.err||!s.wins.length) return null; return s.wins.reduce(function(a,b){return b.left<a.left?b:a}); }
+  function lv(n){ if(S.scn==='off'||n==null) return 'na'; return n>=40?'ok':n>=15?'mid':'low'; }
+  function asking(){ return S.scn==='ask'&&!S.acked; }
+  function chip(s){ return '<span class="chip" style="--h:'+s.hue+'">'+s.mono+'</span>'; }
+  function badge(){ return (S.scn==='ask'&&S.acked)?'<span class="wb">'+WAIT.length+' 个在等</span>':''; }
+  function more(){ return WAIT.length>1?'还有 '+(WAIT.length-1)+' 个在等':''; }
+
+  function listHTML(d){
+    var w0=waits()[0],head;
+    if(asking()){
+      head='<div class="ban attn"><b>'+w0.tool+' 等你回复</b><span>'+w0.proj+' · '+w0.why+' · 已等 <i class="wait-t" style="font-style:normal"></i></span></div>';
+    }else if(S.scn==='low'){
+      var a=d[4],w=tight(a);
+      head='<div class="ban bad"><b>'+a.name+' 快用完了</b><span>'+w.l+' 剩 '+w.left+'% · '+w.reset+'</span></div>';
+    }else if(S.scn==='off'){
+      head='<div class="bh"><span>16:40</span><span>连不上 Mac · 数据停在 14:46</span></div>';
+    }else{
+      head='<div class="bh"><span>14:46</span>'+(badge()||'<span class="sync">已同步</span>')+'</div>';
+    }
+    var rows=d.map(function(s){
+      var w=tight(s);
+      return '<div class="row lv-'+lv(w&&w.left)+'" data-sub="'+s.id+'">'+chip(s)+
+        '<span class="nm">'+s.name+'<small>'+(w?(w.l+(w.reset?' · '+w.reset:'')):'暂时读不到')+'</small></span>'+
+        '<span class="bar"><i style="width:'+(w?w.left:0)+'%"></i></span>'+
+        '<span class="pc">'+(w?w.left:'--')+'<small>%</small></span></div>';
+    }).join('');
+    return '<div class="B'+(S.scn==='off'?' stale':'')+'">'+head+'<div class="rows">'+rows+'</div></div>';
+  }
+
+  function detailHTML(s){
+    var body=s.err
+      ? '<div class="derr"><b>暂时读不到</b><span>CodexBar 命令行提示找不到可读的 Claude 登录状态。在 CodexBar 设置里调整后会恢复。</span></div>'
+      : s.wins.map(function(w){
+          return '<div class="win lv-'+lv(w.left)+'"><span class="wl">'+w.l+'</span><span class="wp">'+w.left+'<small>%</small></span>'+
+            '<span class="bar"><i style="width:'+w.left+'%"></i></span>'+
+            '<span class="wr">'+(w.reset||'这个窗口还没用过')+(w.pace?' · '+w.pace:'')+'</span></div>';
+        }).join('');
+    return '<div class="D"><div class="dh">'+chip(s)+'<b>'+s.name+'</b><small>'+(s.plan||'')+'</small><span class="back">‹ 点屏幕返回</span></div><div class="wins">'+body+'</div></div>';
+  }
+
+  function scrA(){
+    var d=subs();
+    if(S.pageA===1&&!asking()) return listHTML(d);
+    var expr='calm',bub='',mark='';
+    if(asking()){
+      expr='alert';
+      var wa=waits()[0];
+      expr=wa.kind==='done'?'done':'alert'; mark=wa.kind==='done'?'':'!';
+      bub='<div class="bub attn"><b>'+wa.tool+' 等你回复</b><span>'+wa.proj+' · '+wa.why+'</span></div>';
+    }else if(S.scn==='low'){
+      expr='worry'; var a=d[4],w=tight(a);
+      bub='<div class="bub bad"><b>'+a.name+' 快用完了</b><span>'+w.l+' 剩 '+w.left+'% · '+w.reset+'</span></div>';
+    }else if(S.scn==='off'){
+      expr='sleep';
+      bub='<div class="bub mute"><b>连不上 Mac</b><span>数据停在 14:46</span></div>';
+    }
+    var cells=d.map(function(s){
+      var w=tight(s);
+      return '<div class="cell lv-'+lv(w&&w.left)+'"><b>'+s.mono+'</b><em>'+(w?w.left:'--')+'</em><span class="mini"><i style="width:'+(w?w.left:0)+'%"></i></span></div>';
+    }).join('');
+    var foot=asking()
+      ? '<div class="hint"><span>摸头或点屏幕 = 知道了</span><span>已等 <b class="wait-t"></b>'+(more()?' · '+more():'')+'</span></div>'
+      : '<div class="strip">'+cells+'</div>';
+    return '<div class="A'+(bub?' has-bub':'')+'">'+badge()+bub+
+      faceInner(expr,mark)+foot+'</div>';
+  }
+
+  function scrB(){
+    var d=subs();
+    if(S.detailB&&!asking()){
+      var s=d.filter(function(x){return x.id===S.detailB})[0];
+      if(s) return detailHTML(s);
+    }
+    return listHTML(d);
+  }
+
+  function scrC(){
+    var d=subs();
+    if(asking()){
+      var w0=waits()[0];
+      return '<div class="C takeover"><div class="ctop">'+chip(w0)+'<span>'+more()+'</span></div>'+
+        '<div class="t1">'+w0.tool+'</div><div class="t2">等你回复</div><div class="t3">'+w0.proj+' · '+w0.why+'</div>'+
+        '<div class="cf"><span>已等 <b class="wait-t"></b></span><span>摸头或点屏幕 = 知道了</span></div></div>';
+    }
+    var i=S.scn==='low'?4:(S.idxC%d.length);
+    var s=d[i],w=tight(s);
+    var others=s.err?'':s.wins.filter(function(x){return x!==w}).map(function(x){return '<span>'+x.l+' '+x.left+'%</span>'}).join('');
+    var dots=d.map(function(_,k){return '<i class="'+(k===i?'on':'')+'"></i>'}).join('');
+    var main=s.err
+      ? '<div class="big"><b>--</b></div><div class="cerr">暂时读不到 Claude 的额度，需要在 CodexBar 里调一下设置。</div>'
+      : '<div class="big"><b>'+w.left+'</b><span>%</span><em>'+w.l+'剩余</em></div><div class="bar cbar"><i style="width:'+w.left+'%"></i></div><div class="others">'+others+'</div>';
+    var note=S.scn==='off'?'连不上 Mac · 数据停在 14:46':(w?(w.pace||w.reset||''):'');
+    return '<div class="C lv-'+lv(w&&w.left)+(S.scn==='off'?' stale':'')+'"><div class="ch">'+chip(s)+'<b>'+s.name+'</b>'+
+      (badge()||'<small>'+(s.plan||'')+'</small>')+'</div>'+main+'<div class="cf"><span>'+note+'</span><span class="dots">'+dots+'</span></div></div>';
+  }
+
+  function body(){
+    if(S.scn==='ask'){
+      if(S.acked) return {move:'',led:'attn-dim',t:['停下','琥珀色常亮，提醒你还有 AI 在等','不响。屏幕角上留一个「2 个在等」的标记，直到你真的去回复']};
+      return {
+        light:{move:'',led:'attn',t:['不动','琥珀色慢慢呼吸','不响']},
+        mid:{move:'nod',led:'attn',t:['转向你，点一下头','琥珀色慢慢呼吸','响一声，之后不再吵']},
+        strong:{move:'shake',led:'flash',t:['一直左右摇头','琥珀色快闪','每 30 秒响一声，直到你摸头或去回复']}
+      }[S.level];
+    }
+    if(S.scn==='low') return {move:'shake1',led:'bad',t:['慢慢摇一次头','红色常亮','不响']};
+    if(S.scn==='off') return {move:'droop',led:'off',t:['低头','熄灭','不响']};
+    return {move:'',led:'ok',t:['不动','微弱的绿色','不响']};
+  }
+  function applyBody(){
+    var b=body();
+    $$('.robot').forEach(function(r){
+      r.setAttribute('data-led',b.led);
+      r.setAttribute('data-move','');
+      void r.offsetWidth;
+      r.setAttribute('data-move',b.move);
+    });
+    $('#r-head').textContent=b.t[0]; $('#r-led').textContent=b.t[1]; $('#r-snd').textContent=b.t[2];
+  }
+  function tick(){
+    var s=Math.max(0,Math.floor((Date.now()-S.t0)/1000));
+    var t=Math.floor(s/60)+':'+('0'+(s%60)).slice(-2);
+    $$('.wait-t').forEach(function(e){e.textContent=t});
+  }
+  function renderC(){ $('#scrC').innerHTML=scrC(); tick(); }
+  function render(){
+    $('#scrA').innerHTML=scrA(); $('#scrB').innerHTML=scrB(); renderC();
+    applyBody();
+    $$('#seg-scn button').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.scn===S.scn))});
+    $$('#seg-level button').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.level===S.level))});
+    $$('#seg-size button').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.size===S.size))});
+    $('#ctl-level').classList.toggle('dim',S.scn!=='ask');
+    $$('#seg-ask button').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.ask===S.askKind))});
+    $('#ctl-ask').classList.toggle('dim',S.scn!=='ask');
+    $('#datanote').textContent=S.scn==='real'
+      ? '屏幕上的数字是示例数据。'
+      : '屏幕上的数字和情节都是示例，只为演示画面。'+(S.scn==='ask'?'点任意一块屏幕试试「知道了」。':'');
+    fit();
+  }
+  function fit(){
+    $$('.opt').forEach(function(o){
+      var w=o.querySelector('.stage').clientWidth-12;
+      var z=S.size==='real'?0.48:Math.min(1,w/374);
+      o.querySelector('.robot').style.zoom=z;
+    });
+  }
+  function ack(){ S.acked=true; render(); }
+  function chime(){
+    try{
+      var AC=window.AudioContext||window.webkitAudioContext; var ac=new AC();
+      [[880,0],[1175,0.15]].forEach(function(p){
+        var o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime+p[1];
+        o.type='sine'; o.frequency.value=p[0];
+        g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.12,t+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t+0.24);
+        o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t+0.26);
+      });
+      setTimeout(function(){ac.close()},900);
+    }catch(e){}
+  }
+
+  $('#seg-scn').addEventListener('click',function(e){
+    var b=e.target.closest('button'); if(!b) return;
+    S.scn=b.dataset.scn; S.acked=false; S.detailB=null; S.pageA=0;
+    if(S.scn==='ask') S.t0=Date.now()-42000;
+    render();
+  });
+  $('#seg-level').addEventListener('click',function(e){
+    var b=e.target.closest('button'); if(!b) return;
+    S.level=b.dataset.level; S.acked=false;
+    if(S.scn!=='ask'){ S.scn='ask'; S.t0=Date.now()-42000; }
+    render();
+  });
+  $('#seg-ask').addEventListener('click',function(e){
+    var b=e.target.closest('button'); if(!b) return;
+    S.askKind=b.dataset.ask; S.acked=false;
+    if(S.scn!=='ask'){ S.scn='ask'; S.t0=Date.now()-42000; }
+    render();
+  });
+  $('#seg-size').addEventListener('click',function(e){
+    var b=e.target.closest('button'); if(!b) return;
+    S.size=b.dataset.size; render();
+  });
+  $('#btn-replay').addEventListener('click',function(){ if(S.scn==='ask') S.acked=false; render(); });
+  $('#btn-chime').addEventListener('click',chime);
+
+  $('#scrA').addEventListener('click',function(){ if(asking()) return ack(); S.pageA=S.pageA?0:1; render(); });
+  $('#scrB').addEventListener('click',function(e){
+    if(asking()) return ack();
+    if(S.detailB){ S.detailB=null; }
+    else{ var r=e.target.closest('[data-sub]'); if(r) S.detailB=r.dataset.sub; }
+    render();
+  });
+  $('#scrC').addEventListener('click',function(){ if(asking()) return ack(); S.idxC++; renderC(); });
+  $$('.screen').forEach(function(el){
+    el.addEventListener('keydown',function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); el.click(); } });
+  });
+
+  setInterval(tick,1000);
+  setInterval(function(){ if(!asking()&&S.scn!=='low'){ S.idxC++; renderC(); } },4000);
+  if(window.ResizeObserver){ new ResizeObserver(fit).observe($('.board')); }
+  window.addEventListener('resize',fit);
+  $('#gal').innerHTML=[
+    ['平时','没事','calm',''],
+    ['做完了','AI 做完一轮，等你看结果','done',''],
+    ['要你批准','AI 卡住了，等你点允许','alert','!'],
+    ['有问题问你','AI 提了一个问题','alert','?'],
+    ['额度快用完','某个订阅剩余不到 15%','worry',''],
+    ['连不上 Mac','断线或 Mac 睡着了','sleep','']
+  ].map(function(g){
+    return '<figure><div class="screen"><div class="A">'+faceInner(g[2],g[3])+'</div></div><figcaption>'+g[0]+'<small>'+g[1]+'</small></figcaption></figure>';
+  }).join('');
+  render();
+})();
+</script>
+</body>
+</html>

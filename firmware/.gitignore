@@ -1,0 +1,3 @@
+.pio/
+include/build_config.h
+shots/

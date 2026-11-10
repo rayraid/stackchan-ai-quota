@@ -1,0 +1,16 @@
+# 本机环境
+.venv/
+.DS_Store
+__pycache__/
+
+# 小管家的本机配置（里面有口令）
+bridge/config.json
+
+# 固件：编译产物、自动生成的配置（含口令和本机地址）、出厂固件备份、调试截图
+firmware/.pio/
+firmware/include/build_config.h
+firmware/backup/
+firmware/shots/
+
+# 设计过程中的原型页（含个人环境信息），暂不公开
+prototype/

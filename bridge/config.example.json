@@ -1,0 +1,14 @@
+{
+  "listen": "127.0.0.1",
+  "port": 8787,
+  "token": "",
+  "codexbar_cli": "/opt/homebrew/bin/codexbar",
+  "shared_usage_path": "~/Library/Application Support/CodexBar/CLIUsageCache/usage.json",
+  "peon_state_path": "~/.claude/hooks/peon-ping/.state.json",
+  "cli_interval": 300,
+  "shared_interval": 15,
+  "stale_minutes": 20,
+  "waiting_ttl_minutes": 120,
+  "low_percent": 15,
+  "mid_percent": 40
+}
