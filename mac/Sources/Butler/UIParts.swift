@@ -61,7 +61,7 @@ struct RobotPreview: NSViewRepresentable {
             if let u = IconStore.pngDataURL("claude", size: 56, dark: true) { icons["alert"] = u }
         }
         var p: [String: Any] = [
-            "state": state, "theme": s.theme, "icons": icons, "eye": s.eye, "eyeColor": s.eyeColor, "clock": s.clock, "used": s.showUsed,
+            "state": state, "home": s.homeStyle, "theme": s.theme, "icons": icons, "eye": s.eye, "eyeColor": s.eyeColor, "clock": s.clock, "used": s.showUsed,
             "blink": s.blink, "look": s.look, "lang": model.lang.rawValue, "subs": subs,
             "face": model.engine.faceIds(model.subs, s), "mid": s.midPercent, "low": s.lowPercent,
         ]
@@ -83,6 +83,29 @@ struct RobotScreen: View {
             .brightness(-0.35 + Double(model.settings.brightness) / 100 * 0.35)
             .padding(width / 30)
             .background(RoundedRectangle(cornerRadius: width / 22).fill(Color.black))
+    }
+}
+
+/// 首页样式：四个缩略图，点一下就换
+struct HomeStylePicker: View {
+    @ObservedObject var model = AppModel.shared
+    static let styles: [(String, String)] = [("A", "A 轻底栏"), ("B", "B 眼睛就是额度"), ("C", "C 说给你听"), ("D", "D 只有脸")]
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            ForEach(Self.styles, id: \.0) { st in
+                Button { model.settings.homeStyle = st.0 } label: {
+                    VStack(spacing: 5) {
+                        RobotPreview(state: "calm", overrides: ["home": st.0, "look": false, "blink": false])
+                            .frame(width: 96, height: 72)
+                            .allowsHitTesting(false)
+                            .padding(3)
+                            .background(RoundedRectangle(cornerRadius: 7).fill(Color.black))
+                            .overlay(RoundedRectangle(cornerRadius: 7).stroke(model.settings.homeStyle == st.0 ? Color.accentColor : Color.clear, lineWidth: 2.5))
+                        Text(t(st.1)).font(.caption).foregroundStyle(model.settings.homeStyle == st.0 ? .primary : .secondary)
+                    }
+                }.buttonStyle(.plain)
+            }
+        }
     }
 }
 

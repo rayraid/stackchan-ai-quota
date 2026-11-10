@@ -173,6 +173,11 @@ struct DisplayPage: View {
         Form {
             Section { PreviewHeader() }
             Section {
+                LabeledContent {
+                    HomeStylePicker()
+                } label: { Text(t("首页样式")); Text(t("平时机器人屏幕上的样子")) }
+            }
+            Section {
                 LabeledContent(t("配色")) {
                     HStack(spacing: 12) {
                         ForEach(themes, id: \.0) { th in
@@ -197,13 +202,25 @@ struct DisplayPage: View {
                     Text(t("自动：最紧张的一家")).tag("__auto")
                     ForEach(subs) { Text($0.name).tag($0.id) }
                 }
-                Picker(t("每家显示哪个时间段"), selection: $model.settings.windowPref) {
-                    Text(t("自动：最紧张的那个")).tag("auto"); Text(t("5 小时")).tag("5h"); Text(t("本周")).tag("week")
-                }
                 Picker(t("数字表示"), selection: $model.settings.showUsed) {
                     Text(t("还剩多少")).tag(false); Text(t("用了多少")).tag(true)
                 }.pickerStyle(.segmented)
-            } header: { Text(t("内容")) } footer: { Text(t("平时画面底部的 3 格。点机器人的屏幕可以看全部。")) }
+            } header: { Text(t("内容")) } footer: { Text(t("首页上常驻显示的几家：B 只用第 1、2 格，D 平时不显示数字。点机器人的屏幕可以看全部。")) }
+            Section {
+                ForEach(model.subs.filter { !$0.hidden }) { sub in
+                    if sub.windows.count > 1 {
+                        Picker(selection: windowBinding(sub.id)) {
+                            Text(t("自动：最紧张的那个")).tag("")
+                            Divider()
+                            ForEach(sub.windows, id: \.key) { w in Text("\(w.label) · \(w.left)%").tag(w.key) }
+                        } label: { HStack(spacing: 8) { BrandBadge(id: sub.id, mono: sub.mono, hue: sub.hue); Text(sub.name) } }
+                    } else {
+                        LabeledContent {
+                            Text(sub.windows.first.map { t("%@（只有这一个）", $0.label) } ?? "—").foregroundStyle(.secondary)
+                        } label: { HStack(spacing: 8) { BrandBadge(id: sub.id, mono: sub.mono, hue: sub.hue); Text(sub.name) } }
+                    }
+                }
+            } header: { Text(t("每家显示哪个额度")) } footer: { Text(t("首页和「全部额度」列表都显示这里选的那一个。")) }
             Section {
                 Toggle(t("显示时钟"), isOn: $model.settings.clock)
                 Picker(t("没动静多久后变暗"), selection: $model.settings.dimAfter) {
@@ -213,6 +230,11 @@ struct DisplayPage: View {
         }.formStyle(.grouped)
     }
 
+    private func windowBinding(_ id: String) -> Binding<String> {
+        Binding(get: { model.settings.subWindow[id] ?? "" }, set: { v in
+            if v.isEmpty { model.settings.subWindow.removeValue(forKey: id) } else { model.settings.subWindow[id] = v }
+        })
+    }
     private func pinBinding(_ i: Int) -> Binding<String> {
         Binding(get: { model.settings.pinned.count > i ? model.settings.pinned[i] : "" }, set: { v in
             var p = model.settings.pinned
@@ -303,7 +325,7 @@ struct AlertsPage: View {
                         }
                     } label: {
                         Text(a)
-                        if a == "Antigravity" { Text(t("它没有正式的通知，只能靠「几秒没动静」来猜，不太准")) }
+                        if a == "Cursor" || a == "Antigravity" { Text(t("只会提醒「做完了」，等你批准时它不告诉外面")) }
                     }
                 }
             } header: { Text(t("哪些 AI 工具会提醒你")) }
@@ -316,12 +338,18 @@ struct AlertsPage: View {
                 Picker(t("提醒强度"), selection: $model.settings.alertLevel) {
                     Text(t("轻")).tag(0); Text(t("中")).tag(1); Text(t("强")).tag(2)
                 }.pickerStyle(.segmented)
-                Text([t("轻：只变脸、亮灯"), t("中：点一下头、响一声"), t("强：没理会每 5 分钟再点头响一次")][model.settings.alertLevel])
+                Text([t("轻：只变脸、亮灯"), t("中：点一下头、响一声"), t("强：还没回去，每 5 分钟再闪一次、点头、响一声")][model.settings.alertLevel])
                     .font(.caption).foregroundStyle(.secondary)
-                Picker(t("没理会时再提醒"), selection: $model.settings.remind) {
+                Picker(selection: $model.settings.alertSecs) {
+                    Text(t("5 秒")).tag(5); Text(t("30 秒")).tag(30); Text(t("一直到我回去")).tag(0)
+                } label: { Text(t("提醒画面停多久")); Text(t("停完回到平时的脸，彩灯和右上角的小 logo 留到你回去")) }
+                Picker(t("没回去时再提醒"), selection: $model.settings.remind) {
                     Text(t("不再提醒")).tag(0); Text(t("5 分钟后")).tag(5); Text(t("10 分钟后")).tag(10); Text(t("30 分钟后")).tag(30)
                 }
-                Picker(t("提醒最多挂多久"), selection: $model.settings.waitingTTL) {
+                Picker(selection: $model.settings.doneTTL) {
+                    Text(t("5 分钟")).tag(5); Text(t("10 分钟")).tag(10); Text(t("30 分钟")).tag(30); Text(t("等我回去")).tag(0)
+                } label: { Text(t("「做完了」多久后熄灯")); Text(t("AI 已经做完，不是在等你批准")) }
+                Picker(t("「要你批准」最多等多久"), selection: $model.settings.waitingTTL) {
                     Text(t("30 分钟")).tag(30); Text(t("1 小时")).tag(60); Text(t("2 小时")).tag(120); Text(t("直到处理")).tag(0)
                 }
                 LabeledContent(t("试一下")) { Button(t("发一条测试提醒")) { model.testAlert() } }
@@ -374,9 +402,9 @@ struct MotionPage: View {
                 }
             }
             Section(t("头顶触摸")) {
-                Picker(t("摸头"), selection: $model.settings.touch) {
-                    Text(t("知道了（消掉提醒）")).tag(0); Text(t("切换页面")).tag(1); Text(t("什么都不做")).tag(2)
-                }
+                Picker(selection: $model.settings.touch) {
+                    Text(t("开心一下")).tag(0); Text(t("切换页面")).tag(1); Text(t("什么都不做")).tag(2)
+                } label: { Text(t("平时摸头")); Text(t("提醒画面亮着时摸头，总是提前收起")) }
             }
         }.formStyle(.grouped)
     }

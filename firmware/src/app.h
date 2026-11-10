@@ -5,16 +5,18 @@
 #include <ArduinoJson.h>
 #include <vector>
 
-#define FW_VERSION "2.0.0"
+#define FW_VERSION "2.1.0"
 
 struct Win  { String label, level, reset, pace; int left = 0; };
 struct Sub  { String id, name, mono, label, level, reset, error, icon; uint32_t hue = 0xaab2bd; int left = -1; bool stale = false; std::vector<Win> wins; };
-struct Wait { String id, agent, project, kind, text, iconId, iconV; uint32_t since = 0; bool acked = false; };
+struct Wait { String id, agent, mono, project, kind, text, iconId, iconV; uint32_t since = 0; bool acked = false; };
 struct Low  { String id, name, label, reset; int left = 0; };
 
 // 机器人上的设置（小管家随状态下发，见 docs/protocol.md）
 struct Cfg {
   int rev = -1;
+  String home = "B";        // 首页样式：A 轻底栏 / B 眼睛就是额度 / C 说给你听 / D 只有脸
+  int alertSecs = 5;        // 整屏提醒停几秒，0 = 一直到你回去
   String theme = "night", eye = "capsule", name = "StackChan", lang = "zh";
   uint32_t eyeColor = 0; bool eyeColorSet = false;
   int bright = 70;
@@ -25,7 +27,7 @@ struct Cfg {
   bool sound = true; int volume = 60, tone = 1;
   bool led = true; int ledBright = 50;
   uint32_t ledIdle = 0x3ddc84, ledAttn = 0xffb020; bool ledIdleOn = true, ledAttnOn = true;
-  int touch = 0;
+  int touch = 0;            // 平时摸头：0 开心一下 / 1 切换页面 / 2 什么都不做（整屏提醒时摸头总是提前收起）
   bool quiet = false, qStill = true, qMute = true, qDark = true, qFace = true; int qBright = 10;
 };
 
@@ -50,7 +52,7 @@ extern State gState;              // 最近一次的状态（受 gMux 保护）
 extern Cfg gCfg;                  // 当前生效的设置（受 gMux 保护，离线时用上次保存的）
 extern volatile bool gOnline;
 extern volatile uint32_t gFetchedAt;
-extern volatile bool gAckPending;
+extern String gAckId;             // 要告诉小管家「已知道」的那一条（受 gMux 保护，空 = 没有）
 extern volatile int gOta;         // 升级进度：-1 没在升级，0~100 进行中，-2 失败
 extern bool gDemo;
 void netBegin();
@@ -72,6 +74,10 @@ struct UiCtx {
   Page page = P_FACE;
   String detailId;
   uint32_t waited = 0;     // 当前提醒已等了几秒
+  String flashId;          // 正在整屏提醒的那一条
+  float flashLeft = -1;    // 整屏提醒还剩几成时间（0~1），-1 = 一直显示到你回去
+  bool reminder = false;   // 这次是「没回去，再提醒一次」
+  bool happy = false;      // 刚被摸头：眯眼笑
   int otaProgress = -1;
   bool portal = false;
   String ssid;
@@ -79,10 +85,12 @@ struct UiCtx {
 void uiBegin();
 void uiRender(const State& s, const Cfg& c, Mode m, const UiCtx& u);
 int uiListHit(const State& s, int y);   // 明细列表里点到第几行，没点到返回 -1
+// 首页上点了哪里：返回 true 并给出订阅 id = 看那一家的明细；false = 进「全部额度」
+bool uiFaceHit(const State& s, const Cfg& c, int x, int y, String& subId);
 extern M5Canvas cv;
 
 // ---------- body.cpp：头、灯、声音 ----------
-void bodyUpdate(const State& s, const Cfg& c, Mode m);
-void bodyDo(const String& what, const Cfg& c);   // nod / shake / chime / find / droop / idle
+void bodyUpdate(const State& s, const Cfg& c, Mode m, int flashSeq);   // flashSeq 变了 = 新开始一次整屏提醒
+void bodyDo(const String& what, const Cfg& c);   // nod / shake / chime / find / droop / idle / wiggle
 void bodyNoteActivity();
 uint32_t bodyLastActivity();

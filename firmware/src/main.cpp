@@ -1,22 +1,100 @@
 // aihelper 固件 2.0：StackChan（CoreS3）
 // 连 WiFi、每 2 秒向 Mac 上的小管家要一次状态、按设置画到屏幕上；
-// 有 AI 在等你时：整屏变色、点头、亮灯、响一声；摸头或点屏幕表示「知道了」。
+// 有 AI 在等你时：整屏变色、点头、亮灯、响一声，停几秒后自己回到平时的脸，
+// 彩灯保持琥珀色、右上角留一个小 logo，直到你回到那个 AI。不需要碰机器人。
 // 各部分：ui.cpp 画面，body.cpp 头/灯/声音，net.cpp 联网和配置。
 #include "app.h"
 #include <WiFi.h>
 
 static Page gPage = P_FACE;
-static String gDetailId, gAckedLow;
+static String gDetailId;
 static bool gDemoOff = false, gDemoRest = false;
 static String gDemoMode;
 static int gLastCmd = 0;
 RTC_NOINIT_ATTR static int gLastCmdKept;   // 软重启后还记得做过的命令，避免 reboot 命令反复执行
 static uint32_t gOtaFailAt = 0;
+static uint32_t gLastTouch = 0, gHappyUntil = 0;
+static const uint32_t BACK_TO_FACE_MS = 15000;   // 列表、明细 15 秒没碰就回到脸
+static int gSimTap = 0, gSimX = 0, gSimY = 0;    // 串口模拟触摸：1 点一下  2 长按  3 摸头
 
-static String lowKey(const State& s) {
-  String k;
-  for (auto& l : s.lows) k += l.id + l.label + "|";
-  return k;
+// ---------- 整屏提醒：一条一条来，每条停 alertSecs 秒 ----------
+static String gFlashId;               // 正在整屏提醒的那一条
+static uint32_t gFlashAt = 0;
+static bool gFlashReminder = false;   // 这次是「没回去，再提醒一次」
+static int gFlashSeq = 0;             // 每开始一次 +1，body 据此点头、响一声
+static std::vector<String> gFlashed;  // 已经整屏提醒过的
+static uint32_t gLastRemind = 0;
+static bool gSeeded = false;          // 开机后第一次拿到状态时，已经在等的不再重新闪一遍
+
+static int rankOf(const String& k) { return k == "approval" ? 0 : k == "question" ? 1 : k == "error" ? 2 : k == "done" ? 3 : k == "restored" ? 4 : 5; }
+static bool wasFlashed(const String& id) { for (auto& x : gFlashed) if (x == id) return true; return false; }
+static const Wait* findWait(const State& s, const String& id) { for (auto& w : s.waiting) if (w.id == id) return &w; return nullptr; }
+// 最要紧的一条：批准 > 提问 > 出错 > 做完了，同类先来的先
+static const Wait* topWait(const State& s, bool onlyNew) {
+  const Wait* best = nullptr;
+  for (auto& w : s.waiting) {
+    if (w.acked || (onlyNew && wasFlashed(w.id))) continue;
+    if (!best || rankOf(w.kind) < rankOf(best->kind) || (rankOf(w.kind) == rankOf(best->kind) && w.since < best->since)) best = &w;
+  }
+  return best;
+}
+static void startFlash(const String& id, bool reminder) {
+  gFlashId = id; gFlashAt = millis(); gFlashReminder = reminder; gFlashSeq++; gLastRemind = millis();
+}
+static void endFlash() {
+  if (gFlashId.length() && !wasFlashed(gFlashId)) gFlashed.push_back(gFlashId);
+  gFlashId = "";
+}
+static void updateFlash(const State& s, const Cfg& c) {
+  if (!s.valid) return;
+  for (size_t i = 0; i < gFlashed.size();) { if (findWait(s, gFlashed[i])) i++; else gFlashed.erase(gFlashed.begin() + i); }   // 不在等的就忘掉
+  if (!gSeeded) { gSeeded = true; for (auto& w : s.waiting) gFlashed.push_back(w.id); gLastRemind = millis(); }
+  bool hide = (c.quiet || s.rest) && !c.qFace;      // 勿扰时不变脸
+  int every = c.remind > 0 ? c.remind : (c.alert >= 2 ? 5 : 0);   // 分钟；「强」默认每 5 分钟再来一次
+  if (gFlashId.length()) {
+    const Wait* w = findWait(s, gFlashId);
+    bool timeUp = c.alertSecs > 0 && millis() - gFlashAt > (uint32_t)c.alertSecs * 1000;
+    if (!w || w->acked || timeUp || hide) endFlash();
+    else if (c.alertSecs <= 0 && every > 0 && millis() - gLastRemind > (uint32_t)every * 60000) {   // 一直整屏时，到点再点一次头
+      gFlashSeq++; gLastRemind = millis(); gFlashReminder = true;
+    }
+  }
+  if (hide || gFlashId.length()) return;
+  if (const Wait* w = topWait(s, true)) { startFlash(w->id, false); return; }
+  if (every > 0 && millis() - gLastRemind > (uint32_t)every * 60000) {
+    gLastRemind = millis();
+    if (const Wait* w = topWait(s, false)) startFlash(w->id, true);
+  }
+}
+// 整屏提醒时摸头 / 点屏幕：提前收起这一条，告诉小管家「已知道」（之后不再重复提醒，灯和小 logo 照旧到你回去）
+static void collapseFlash() {
+  if (!gFlashId.length()) return;
+  xSemaphoreTake(gMux, portMAX_DELAY);
+  for (auto& w : gState.waiting) if (w.id == gFlashId) w.acked = true;
+  if (!gDemo) gAckId = gFlashId;
+  xSemaphoreGive(gMux);
+  endFlash();
+}
+
+// ---------- 额度快用完：红卡片亮 1 分钟就收进首页；掉到更低一档（5%、用完）或另一家也快用完时再来一次 ----------
+static std::vector<String> gLowSeen;  // 已经提醒过的「哪一家|哪个时间段|档位」
+static uint32_t gLowAt = 0;           // 这次红卡片开始的时间，0 = 没在显示
+static String lowTier(const Low& l) { return l.id + "|" + l.label + "|" + (l.left <= 0 ? "0" : l.left <= 5 ? "5" : "x"); }
+static void updateLow(const State& s) {
+  if (!s.valid) return;
+  std::vector<String> now;
+  for (auto& l : s.lows) now.push_back(lowTier(l));
+  for (size_t i = 0; i < gLowSeen.size();) {          // 恢复了的就忘掉，以后再掉下来还会提醒
+    bool keep = false;
+    for (auto& k : now) if (k == gLowSeen[i]) keep = true;
+    if (keep) i++; else gLowSeen.erase(gLowSeen.begin() + i);
+  }
+  for (auto& k : now) {
+    bool seen = false;
+    for (auto& x : gLowSeen) if (x == k) seen = true;
+    if (!seen) { gLowSeen.push_back(k); gLowAt = millis() | 1; }
+  }
+  if (gLowAt && millis() - gLowAt > 60000) gLowAt = 0;
 }
 
 // ---------- 当前该显示什么 ----------
@@ -34,40 +112,37 @@ static Mode computeMode(const State& s, const Cfg& c) {
     if (!netHasToken()) return M_NOLINK;
     if (!gOnline || !s.valid) return (s.valid && s.rest) ? M_REST : M_OFF;
   }
-  bool hide = (c.quiet || s.rest) && !c.qFace;      // 勿扰时不变脸
-  for (auto& w : s.waiting) if (!w.acked && !hide) return M_ASK;
-  if (!s.lows.empty() && lowKey(s) != gAckedLow && !s.rest) return M_LOW;
+  if (gFlashId.length()) return M_ASK;
+  if (gLowAt && !s.lows.empty() && !s.rest) return M_LOW;
   if (s.rest) return M_REST;
   if (!s.ok) return M_STALE;
   return M_CALM;
 }
 
-static void ackAll() {
-  xSemaphoreTake(gMux, portMAX_DELAY);
-  for (auto& w : gState.waiting) w.acked = true;
-  xSemaphoreGive(gMux);
-  if (!gDemo) gAckPending = true;
-}
-
-static void onTap(int y, const State& s, Mode m) {
+static void onTap(int x, int y, const State& s, const Cfg& c, Mode m) {
   bodyNoteActivity();
   if (m == M_SETUP || m == M_NOLINK || m == M_CONNECTING || m == M_OFF || m == M_UPDATING) return;
-  if (m == M_ASK) { ackAll(); return; }
-  if (m == M_LOW && gPage == P_FACE) { gAckedLow = lowKey(s); return; }
-  if (gPage == P_FACE) gPage = P_LIST;
-  else if (gPage == P_LIST) {
-    int i = uiListHit(s, y);
-    if (i >= 0) { gDetailId = s.subs[i].id; gPage = P_DETAIL; }
-    else gPage = P_FACE;
-  } else gPage = P_LIST;
+  if (m == M_ASK) { collapseFlash(); return; }
+  if (m == M_LOW && gPage == P_FACE) { gLowAt = 0; return; }
+  if (gPage == P_FACE) {               // 脸上：点某一家 → 它的明细，点别处 → 全部额度（位置跟着首页样式走）
+    String id;
+    if (uiFaceHit(s, c, x, y, id)) { gDetailId = id; gPage = P_DETAIL; }
+    else gPage = P_LIST;
+  } else gPage = P_FACE;               // 列表、明细：点哪里都回到脸
 }
-
+static void onHold(int x, int y, const State& s, Mode m) {
+  bodyNoteActivity();
+  if (gPage != P_LIST || m == M_ASK) return;
+  int i = uiListHit(s, y);             // 列表里长按某一行 → 它的明细
+  if (i >= 0) { gDetailId = s.subs[i].id; gPage = P_DETAIL; }
+}
 static void onPat(const State& s, const Cfg& c, Mode m) {
   bodyNoteActivity();
-  if (c.touch == 2) return;
-  if (m == M_ASK) { ackAll(); return; }
-  if (m == M_LOW && gPage == P_FACE) { gAckedLow = lowKey(s); return; }
-  if (c.touch == 1 && (m == M_CALM || m == M_STALE)) gPage = gPage == P_FACE ? P_LIST : P_FACE;
+  if (m == M_ASK) { collapseFlash(); return; }          // 整屏提醒时摸头：提前收起
+  if (m == M_LOW && gPage == P_FACE) { gLowAt = 0; return; }
+  if (m != M_CALM && m != M_STALE && m != M_LOW) return;
+  if (c.touch == 0) { gPage = P_FACE; gHappyUntil = millis() + 1300; bodyDo("wiggle", c); }   // 开心一下
+  else if (c.touch == 1) gPage = gPage == P_FACE ? P_LIST : P_FACE;
 }
 
 static void applyBrightness(const Cfg& c, Mode m) {
@@ -124,7 +199,7 @@ static void demo(const String& kind) {
     for (auto& w : s.waiting) tr2(w.project);
     for (auto& l : s.lows) { tr2(l.label); tr2(l.reset); }
   }
-  gAckedLow = "";
+  gLowSeen.clear(); gLowAt = 0;
   xSemaphoreTake(gMux, portMAX_DELAY);
   gState = s; gFetchedAt = millis();
   xSemaphoreGive(gMux);
@@ -174,9 +249,15 @@ static void handleSerial() {
       xSemaphoreGive(gMux);
       Serial.println("OK");
     }
-    else if (cmd == "page face") { gPage = P_FACE; Serial.println("OK"); }
-    else if (cmd == "page list") { gPage = P_LIST; Serial.println("OK"); }
-    else if (cmd.startsWith("page detail ")) { gDetailId = cmd.substring(12); gPage = P_DETAIL; Serial.println("OK"); }
+    else if (cmd == "page face") { gPage = P_FACE; gLastTouch = millis(); Serial.println("OK"); }
+    else if (cmd == "page list") { gPage = P_LIST; gLastTouch = millis(); Serial.println("OK"); }
+    else if (cmd.startsWith("page detail ")) { gDetailId = cmd.substring(12); gPage = P_DETAIL; gLastTouch = millis(); Serial.println("OK"); }
+    else if (cmd == "pat") { gSimTap = 3; Serial.println("OK"); }                     // 模拟摸头
+    else if (cmd.startsWith("tap ") || cmd.startsWith("hold ")) {                   // 模拟点屏幕：tap 160 200 / hold 160 120
+      int sp = cmd.indexOf(' '), sp2 = cmd.indexOf(' ', sp + 1);
+      gSimX = cmd.substring(sp + 1, sp2).toInt(); gSimY = cmd.substring(sp2 + 1).toInt();
+      gSimTap = cmd.startsWith("tap") ? 1 : 2; Serial.println("OK");
+    }
     else if (cmd == "info") Serial.printf("INFO fw=%s %s demo=%d heap=%u psram=%u rev=%d\n", FW_VERSION, netInfo().c_str(), (int)gDemo, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getFreePsram(), c.rev);
     else if (cmd == "body") {
       auto in = M5StackChan.TouchSensor.getIntensities();
@@ -226,30 +307,39 @@ void loop() {
   if (gOta == -2 && !gOtaFailAt) gOtaFailAt = millis();
   if (gOta == -2 && millis() - gOtaFailAt > 6000) { gOta = -1; gOtaFailAt = 0; }
 
+  updateFlash(s, c);
+  updateLow(s);
   Mode m = computeMode(s, c);
   auto t = M5.Touch.getDetail();
   bool touched = false;
-  if (t.wasClicked()) { onTap(t.y, s, m); touched = true; }
-  if (M5StackChan.TouchSensor.wasPressed()) { onPat(s, c, m); touched = true; }
-  if (touched) {          // 「知道了」以后立刻生效
+  if (t.wasClicked() || gSimTap == 1) { onTap(gSimTap ? gSimX : t.x, gSimTap ? gSimY : t.y, s, c, m); touched = true; }
+  else if (t.wasHold() || gSimTap == 2) { onHold(gSimTap ? gSimX : t.x, gSimTap ? gSimY : t.y, s, m); touched = true; }
+  if (M5StackChan.TouchSensor.wasPressed() || gSimTap == 3) { onPat(s, c, m); touched = true; }
+  gSimTap = 0;
+  if (touched) {          // 收起提醒以后立刻生效
+    gLastTouch = millis();
     xSemaphoreTake(gMux, portMAX_DELAY);
     s = gState;
     xSemaphoreGive(gMux);
     m = computeMode(s, c);
   }
+  if (gPage != P_FACE && millis() - gLastTouch > BACK_TO_FACE_MS) gPage = P_FACE;
 
   UiCtx u;
   u.page = gPage;
   u.detailId = gDetailId;
   u.otaProgress = gOta;
   u.ssid = netSsid();
-  for (auto& w : s.waiting) if (!w.acked) {
-    uint32_t base = s.now > w.since ? s.now - w.since : 0;
+  u.flashId = gFlashId;
+  u.reminder = gFlashReminder;
+  u.happy = millis() < gHappyUntil;
+  if (gFlashId.length() && c.alertSecs > 0) u.flashLeft = 1.0f - std::min(1.0f, (millis() - gFlashAt) / (c.alertSecs * 1000.0f));
+  if (const Wait* w = findWait(s, gFlashId)) {
+    uint32_t base = s.now > w->since ? s.now - w->since : 0;
     u.waited = base + (gDemo ? 0 : (millis() - gFetchedAt) / 1000);
-    break;
   }
   uiRender(s, c, m, u);
-  bodyUpdate(s, c, m);
+  bodyUpdate(s, c, m, gFlashSeq);
   applyBrightness(c, m);
   delay(30);
 }

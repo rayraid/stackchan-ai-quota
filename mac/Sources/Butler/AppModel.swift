@@ -46,6 +46,7 @@ final class AppModel: ObservableObject {
 
     func start() {
         startServer()
+        work.async { AgentHooks.refreshBundledHooks() }
         work.async { [engine] in engine.readShared(); engine.runCLI() }
         timers.append(Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.work.async { self?.engine.readShared() } }

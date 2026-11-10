@@ -6,7 +6,7 @@
 // 机器人屏幕的预览：和固件 ui.cpp 同样的画法，在小管家的设置和向导里用。
 const CN='"PingFang SC","Hiragino Sans","Hiragino Sans GB",sans-serif';
 const NUM='"Avenir Next","Helvetica Neue",sans-serif';
-let P={icons:{},state:'calm',theme:'night',eye:'capsule',eyeColor:'',clock:false,used:false,blink:true,look:true,lang:'zh',subs:[],face:[],mid:40,low:15};
+let P={icons:{},state:'calm',home:'B',theme:'night',eye:'capsule',eyeColor:'',clock:false,used:false,blink:true,look:true,lang:'zh',subs:[],face:[],mid:40,low:15};
 const TXT={
  zh:{approval:'要你批准',question:'有问题问你',done:'做完了',only:'只剩 %d%',pat:'摸头 = 知道了',waited:'已等 0:42',all:'全部额度',allUsed:'已用额度',synced:'已同步',back:'点屏幕返回',left:'还剩',used:'已用',proj:'aihelper'},
  ja:{approval:'承認待ち',question:'質問があります',done:'完了しました',only:'残り %d%',pat:'頭をなでる = 了解',waited:'待ち 0:42',all:'残量一覧',allUsed:'使用量一覧',synced:'同期済み',back:'タップで戻る',left:'残り',used:'使用',proj:'aihelper'},
@@ -29,10 +29,10 @@ function lookDx(t,a){const p=(t%9000)/9000;if(p<.2)return 0;if(p<.27)return -a*(
 function eyes(c,expr,cx,cy,t,o){
   const xs=[cx-o.gap/2,cx+o.gap/2];c.save();if(o.glow){c.shadowColor=o.glow;c.shadowBlur=16;}
   c.fillStyle=o.color;c.strokeStyle=o.color;
-  if(expr==='happy'){c.lineWidth=10;c.lineCap='round';xs.forEach(x=>{c.beginPath();c.arc(x,cy+12,21,Math.PI*1.17,Math.PI*1.83);c.stroke();});c.restore();return;}
-  let {w,h,r}=EYES[P.eye]||EYES.capsule;
+  if(expr==='happy'){const k=o.sc||1;c.lineWidth=10*k;c.lineCap='round';xs.forEach(x=>{c.beginPath();c.arc(x,cy+12*k,21*k,Math.PI*1.17,Math.PI*1.83);c.stroke();});c.restore();return;}
+  const sc=o.sc||1;let {w,h,r}=EYES[P.eye]||EYES.capsule;w*=sc;h*=sc;r*=sc;
   if(expr==='alert'){w*=1.22;h*=1.12;r*=1.22;}
-  const dx=(expr==='calm'&&P.look)?lookDx(t,9):0, bl=P.blink&&expr!=='alert'&&(t%4300)>4140;
+  const dx=(expr==='calm'&&P.look)?lookDx(t,9*sc):0, bl=P.blink&&expr!=='alert'&&(t%4300)>4140;
   if(bl)h=7;
   xs.forEach((x,i)=>{c.save();
     if(expr==='worry'&&!bl){const k=.45*h/w,sg=i===0?1:-1,xin=x+sg*w/2,xout=x-sg*w/2,top=cy-h/2,E=30;
@@ -45,17 +45,38 @@ const IMGS={};
 function img(id){const u=P.icons&&P.icons[id];if(!u)return null;let im=IMGS[id];if(!im||im.src!==u){im=new Image();im.onload=()=>draw(ctx,performance.now()-t0);im.src=u;IMGS[id]=im;}return im.complete&&im.naturalWidth?im:null;}
 function badge(c,s,x,y,size){const im=img(s.id);if(im){c.imageSmoothingQuality='high';c.drawImage(im,x,y,size,size);return;}
   rr(c,x,y,size,size,size*.3,s.hue);tx(c,s.mono,x+size/2,y+size/2+1,size*.46,'#0b0e13',{w:800,al:'center',bl:'middle',fam:NUM});}
-function pills(c,T,grey){
-  let v=P.face.map(sub).filter(Boolean);if(!v.length)v=P.subs.slice(0,3);v=v.slice(0,3);
-  const n=v.length;if(!n)return;const w=(304-8*(n-1))/n;
-  v.forEach((s,i)=>{const x=8+i*(w+8),y=170,h=62,lv=lvl(s.left),col=grey?lvc(P.theme,'na'):lvc(P.theme,lv);
-    const val=s.left<0?-1:(P.used?100-s.left:s.left);
-    rr(c,x,y,w,h,14,T.panel);
-    badge(c,s,x+8,y+11,28);
-    const num=val<0?'--':String(val);c.font=`700 27px ${NUM}`;const nw=c.measureText(num).width;
-    tx(c,num,x+w-22-nw,y+12,27,lv==='ok'?T.fg:col,{w:700,fam:NUM});if(val>=0)tx(c,'%',x+w-20,y+24,13,T.dim,{w:600,fam:NUM});
-    rr(c,x+10,y+h-10,w-20,5,2.5,T.track);if(val>0)rr(c,x+10,y+h-10,Math.max(5,(w-20)*val/100),5,2.5,col);});
-}
+// ---------- 首页四种样式（和固件 ui.cpp 的 homeA~homeD 同样的位置） ----------
+function faceSubs(n){let v=P.face.map(sub).filter(Boolean);if(!v.length)v=P.subs.slice(0,n);return v.slice(0,n);}
+function valOf(s){const v=s.left<0?-1:(P.used?100-s.left:s.left),lv=s.left<0?'na':lvl(s.left);return {v,lv,col:lvc(P.theme,lv)};}
+function numPct(c,T,q,x,cy,px,right){const num=q.v<0?'--':String(q.v);c.font=`700 ${px}px ${NUM}`;const nw=c.measureText(num).width;c.font=`600 12px ${NUM}`;
+  const pw=q.v<0?0:c.measureText('%').width+2,x0=right?x-nw-pw:x;
+  tx(c,num,x0,cy,px,q.lv==='ok'?T.fg:(q.lv==='na'?T.dim:q.col),{w:700,fam:NUM,bl:'middle'});if(q.v>=0)tx(c,'%',x0+nw+2,cy+4,12,T.dim,{w:600,fam:NUM,bl:'middle'});}
+function chip(c,T,s,cy){const t=L().only.replace('%d',Math.max(0,s.left));c.font=`600 16px ${CN}`;const w=12+20+6+c.measureText(t).width+14,x=160-w/2,red=lvc(P.theme,'low');
+  rr(c,x,cy-15,w,30,15,alpha(red,.55));rr(c,x+1.5,cy-13.5,w-3,27,13.5,P._bg);rr(c,x+1.5,cy-13.5,w-3,27,13.5,alpha(red,.16));
+  badge(c,s,x+12,cy-10,20);tx(c,t,x+38,cy+1,16,red,{w:600,bl:'middle'});}
+function homeA(c,T,t,ec){eyes(c,'calm',160,90,t,{gap:118,color:ec,glow:T.glow,sc:1.18});const v=faceSubs(3),n=v.length;
+  v.forEach((s,i)=>{const cx=160+(i-(n-1)/2)*104,q=valOf(s);badge(c,s,cx-40,186,22);numPct(c,T,q,cx-12,198,22,false);
+    rr(c,cx-40,218,82,3,1.5,T.track);if(q.v>0)rr(c,cx-40,218,Math.max(3,82*q.v/100),3,1.5,q.col);
+    if(i<n-1){c.fillStyle=alpha('#8b95a3',.25);c.fillRect(cx+52,188,1,26);}});}
+const TANK={capsule:{w:64,h:102,r:30},round:{w:84,h:84,r:42},bar:{w:38,h:100,r:19}};
+function tank(c,T,x,cy,g,left,fill,ec,glow){const x0=x-g.w/2,y0=cy-g.h/2;
+  c.save();if(glow){c.shadowColor=T.glow;c.shadowBlur=12;}rr(c,x0,y0,g.w,g.h,g.r,alpha(ec,.24));c.restore();
+  rr(c,x0+2,y0+2,g.w-4,g.h-4,Math.max(1,g.r-2),P._bg);rr(c,x0+2,y0+2,g.w-4,g.h-4,Math.max(1,g.r-2),alpha(ec,.07));
+  if(left>0){const top=y0+g.h-g.h*Math.min(100,left)/100;c.save();c.beginPath();c.rect(x0-1,top,g.w+2,y0+g.h-top+2);c.clip();rr(c,x0,y0,g.w,g.h,g.r,fill);c.restore();}}
+function homeB(c,T,t,ec){const v=faceSubs(2),g=TANK[P.eye]||TANK.capsule,dx=P.look?lookDx(t,7):0,bl=P.blink&&(t%4300)>4140;
+  [108,212].forEach((x,i)=>{const s=v[i],fill=!s?ec:(s.left>=0&&lvl(s.left)==='low'?lvc(P.theme,'low'):ec);
+    if(bl)rr(c,x+dx-g.w/2,98-3.5,g.w,7,3.5,fill);else tank(c,T,x+dx,98,g,s?Math.max(0,s.left):100,fill,ec,!!T.glow);
+    if(!s)return;const q=valOf(s),num=q.v<0?'--':String(q.v);c.font=`700 22px ${NUM}`;const x0=x-(20+6+c.measureText(num).width+14)/2;
+    badge(c,s,x0,167,20);numPct(c,T,q,x0+26,177,22,false);});
+  const lo=P.subs.find(s=>!v.includes(s)&&s.left>=0&&lvl(s.left)==='low');if(lo)chip(c,T,lo,216);}
+function homeC(c,T,t,ec){eyes(c,'calm',74,128,t,{gap:58,color:ec,glow:T.glow,sc:.72});
+  rr(c,140,12,172,216,18,T.panel);c.beginPath();c.moveTo(141,112);c.lineTo(124,128);c.lineTo(141,144);c.closePath();c.fillStyle=T.panel;c.fill();
+  const v=faceSubs(3),n=v.length,h=n?Math.min(68,Math.floor(204/n)):68,top0=12+Math.floor((216-n*h)/2);
+  v.forEach((s,i)=>{const top=top0+i*h,q=valOf(s);badge(c,s,154,top+h/2-24,24);numPct(c,T,q,298,top+h/2-12,28,true);
+    rr(c,154,top+h/2+10,144,4,2,T.track);if(q.v>0)rr(c,154,top+h/2+10,Math.max(4,144*q.v/100),4,2,q.col);
+    if(i<n-1){c.fillStyle=alpha('#8b95a3',.22);c.fillRect(154,top+h-1,144,1);}});}
+function homeD(c,T,t,ec){const lo=P.subs.find(s=>s.left>=0&&lvl(s.left)==='low'),cy=lo?96:112;
+  eyes(c,'calm',160,cy,t,{gap:124,color:ec,glow:T.glow,sc:1.36});if(lo)chip(c,T,lo,205);}
 function draw(c,t){
   const T=THEMES[P.theme]||THEMES.night,eyeCol=P.eyeColor||T.eye,st=P.state;
   if(st==='approval'||st==='done'||st==='question'){
@@ -68,8 +89,8 @@ function draw(c,t){
     else if(st!=='done')tx(c,st==='approval'?'!':'?',268,22,38,fg,{w:800,al:'center',fam:NUM});
     c.font=`800 38px ${CN}`;tx(c,fit(c,L()[st],308),160,120,38,fg,{w:800,al:'center'});
     tx(c,'Claude Code · '+L().proj,160,172,17,alpha(fg,.82),{al:'center'});
-    tx(c,L().pat+' · '+L().waited,160,208,14,alpha(fg,.62),{al:'center'});return;}
-  const g=bg(c,T);
+    rr(c,100,218,120,5,2.5,alpha(fg,.18));rr(c,100,218,72,5,2.5,alpha(fg,.55));return;}
+  const g=bg(c,T);P._bg=g;
   if(st==='list'){
     tx(c,P.used?L().allUsed:L().all,12,9,19,T.fg,{w:700});tx(c,L().synced,308,11,14,T.dim,{al:'right'});
     const n=Math.min(P.subs.length,6),h=n?200/n:200;
@@ -81,15 +102,13 @@ function draw(c,t){
       tx(c,val<0?'--':val+'%',308,cy+1,22,lv==='ok'?T.fg:col,{w:700,al:'right',bl:'middle',fam:NUM});});return;}
   if(st==='low'){
     const s=[...P.subs].sort((a,b)=>a.left-b.left)[0]||{name:'AI',left:8,reset:''};
-    eyes(c,'worry',160,134,t,{gap:104,color:eyeCol,glow:null});
+    eyes(c,'worry',160,156,t,{gap:110,color:eyeCol,glow:null,sc:1.1});
     rr(c,8,8,304,68,18,'#ff5d5d');c.beginPath();c.arc(42,42,19,0,7);c.fillStyle='#2a0606';c.fill();
     tx(c,'!',42,43,22,'#ff5d5d',{w:800,al:'center',bl:'middle',fam:NUM});
     tx(c,L().only.replace('%d',Math.max(0,s.left)),72,12,25,'#2a0606',{w:700});
-    c.font=`500 16px ${CN}`;tx(c,fit(c,s.name+' · '+(s.reset||''),230),72,46,16,alpha('#2a0606',.8));
-    pills(c,T,false);return;}
-  eyes(c,'calm',160,92,t,{gap:104,color:eyeCol,glow:T.glow});
+    c.font=`500 16px ${CN}`;tx(c,fit(c,s.name+' · '+(s.reset||''),230),72,46,16,alpha('#2a0606',.8));return;}
+  ({A:homeA,C:homeC,D:homeD}[P.home]||homeB)(c,T,t,eyeCol);
   if(P.clock){const d=new Date();tx(c,String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'),12,10,18,T.dim,{w:600,fam:NUM});}
-  pills(c,T,false);
 }
 const cv=document.getElementById('c'),ctx=cv.getContext('2d'),t0=performance.now();
 function frame(){draw(ctx,performance.now()-t0);requestAnimationFrame(frame);}

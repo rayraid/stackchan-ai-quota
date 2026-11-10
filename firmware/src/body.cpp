@@ -30,6 +30,8 @@ static void nod(const Cfg& c) {
 static void shake(const Cfg& c) { int p = idlePitch(c); play({{-180, p, 300, 700}, {180, p, 300, 1000}, {0, p, 300, 0}}); }
 static void droop() { play({{0, 50, 250, 0}}); }
 static void idle(const Cfg& c) { play({{0, idlePitch(c), 300, 0}}); }
+// 被摸头时开心地晃一下
+static void wiggle(const Cfg& c) { int p = idlePitch(c); play({{-70, p + 40, 500, 180}, {70, p + 40, 500, 200}, {-40, p + 20, 450, 160}, {0, p, 350, 0}}); }
 
 // ---------- 声音：几个音排队播放，不卡画面 ----------
 struct Note { uint16_t f, ms, gap; };
@@ -77,42 +79,36 @@ void bodyDo(const String& what, const Cfg& c) {
   else if (what == "idle") idle(c);
   else if (what == "chime") chime(c);
   else if (what == "find") { nod(c); chime(c); gFindUntil = millis() + 3000; }
+  else if (what == "wiggle") wiggle(c);
 }
 
-void bodyUpdate(const State& s, const Cfg& c, Mode m) {
-  static String lastAlertId;
-  static uint32_t lastRemind = 0, nextWander = 0;
-  static int lastKind = -1;
+void bodyUpdate(const State& s, const Cfg& c, Mode m, int flashSeq) {
+  static uint32_t nextWander = 0;
+  static int lastKind = -1, lastSeq = 0;
   bool quiet = c.quiet || s.rest;
   gStill = !c.motion || (quiet && c.qStill);
   bool mute = !c.sound || (quiet && c.qMute);
   bool dark = !c.led || (quiet && c.qDark);
   float lb = constrain(c.ledBright, 0, 100) / 100.0f;
 
-  // kind：0 不动  1 平时  2 等你  3 已知道但还在等  4 额度快用完  5 连不上 / 休息
+  // kind：0 不动  1 平时  2 整屏提醒中  3 整屏收了但还有 AI 在等  4 额度快用完  5 连不上 / 休息
   int kind;
   bool anyWaiting = !s.waiting.empty();
   if (m == M_ASK) kind = 2;
   else if (m == M_LOW) kind = 4;
   else if (m == M_OFF || m == M_REST) kind = 5;
-  else if (m == M_CALM) kind = anyWaiting ? 3 : 1;
-  else if (m == M_STALE) kind = anyWaiting ? 3 : 0;
+  else if (m == M_CALM || m == M_STALE) kind = anyWaiting ? 3 : 1;
   else kind = 0;
 
-  if (m == M_ASK) {
-    String id;
-    for (auto& w : s.waiting) if (!w.acked) { id = w.id; break; }
-    int every = c.remind > 0 ? c.remind : (c.alert >= 2 ? 5 : 0);   // 分钟；「强」默认每 5 分钟再来一次
-    bool fresh = id != lastAlertId;
-    bool again = !fresh && every > 0 && millis() - lastRemind > (uint32_t)every * 60000;
-    if (fresh || again) {
-      lastAlertId = id;
-      lastRemind = millis();
+  // 每开始一次整屏提醒（新来的、或「强」档再提醒）：点头、响一声
+  if (flashSeq != lastSeq) {
+    lastSeq = flashSeq;
+    if (m == M_ASK) {
       bodyNoteActivity();
       if (c.alert >= 1) { nod(c); if (!mute) chime(c); }
     }
-  } else {
-    lastAlertId = "";
+  }
+  if (m != M_ASK) {
     if (kind != lastKind) {
       if (kind == 4 && c.shakeLow) shake(c);
       else if (kind == 5) droop();
@@ -144,7 +140,7 @@ void bodyUpdate(const State& s, const Cfg& c, Mode m) {
       float k = 0.12f + 0.88f * (0.5f - 0.5f * cosf(ph * 2 * PI));
       setLed(scale(c.ledAttn, k * .5f * lb * 2));
     } break;
-    case 3: setLed(c.ledAttnOn ? scale(c.ledAttn, .14f * lb * 2) : 0); break;
+    case 3: setLed(c.ledAttnOn ? scale(c.ledAttn, .24f * lb * 2) : 0); break;   // 常亮：还有 AI 在等你
     case 4: setLed(scale(0xff2020, .36f * lb * 2)); break;
     default: setLed(0);
   }

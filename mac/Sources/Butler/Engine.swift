@@ -34,6 +34,7 @@ private let SLOTS = ["primary", "secondary", "tertiary"]
 // ---------- 给界面用的数据 ----------
 struct QuotaWindow: Hashable {
     var label: String; var left: Int; var level: String; var reset: String; var pace: String; var minutes: Int
+    var key = ""                     // 「分组|分钟数」，不随语言变，设置里「每家显示哪个额度」记的就是它
 }
 struct Subscription: Identifiable, Hashable {
     var id: String; var name: String; var mono: String; var hue: String
@@ -166,7 +167,7 @@ final class Engine: @unchecked Sendable {
             let label = (group.isEmpty ? "" : group + " ") + Gen.windowLabel(minutes, l)
             let reset = Gen.resetText(parseISO(w["resetsAt"] as? String), minutes: minutes, l)
             let paceText = Gen.paceText(etaSeconds: (p?["etaSeconds"] as? NSNumber)?.doubleValue, willLast: (p?["willLastToReset"] as? Bool) ?? true, l)
-            wins.append((QuotaWindow(label: label, left: left, level: level(left, s), reset: reset, pace: paceText, minutes: minutes), group))
+            wins.append((QuotaWindow(label: label, left: left, level: level(left, s), reset: reset, pace: paceText, minutes: minutes, key: group + "|" + String(minutes)), group))
         }
         for slot in SLOTS {
             guard let w = base[slot] as? [String: Any] else { continue }
@@ -210,8 +211,9 @@ final class Engine: @unchecked Sendable {
                                        shown: nil, hidden: s.subHidden.contains(pid))
                 if !wins.isEmpty {
                     var pick = wins.min { $0.left < $1.left }
-                    if s.windowPref == "5h", let w = wins.first(where: { $0.minutes == 300 }) { pick = w }
-                    if s.windowPref == "week", let w = wins.first(where: { $0.minutes == 10080 }) { pick = w }
+                    if let k = s.subWindow[pid], let w = wins.first(where: { $0.key == k }) { pick = w }   // 这一家单独选过
+                    else if s.windowPref == "5h", let w = wins.first(where: { $0.minutes == 300 }) { pick = w }
+                    else if s.windowPref == "week", let w = wins.first(where: { $0.minutes == 10080 }) { pick = w }
                     sub.shown = pick
                 }
                 out.append(sub)
@@ -323,6 +325,10 @@ final class Engine: @unchecked Sendable {
             let before = waiting.count
             waiting.removeAll { w in
                 if w.ttl > 0 && now - w.since > w.ttl { return true }
+                // 「做完了」「出错停下了」不挡着 AI 干活，到设定时间就熄灯；「要你批准」「有问题问你」挂到 ttl
+                if s.doneTTL > 0, ["done", "error", "note"].contains(w.kind), now - w.since > Double(s.doneTTL * 60) {
+                    log("等你回复 -", w.agent, "·", w.project, "（做完了，到时间自动熄灯）"); return true
+                }
                 if now - w.since > ttl { log("等你回复 -", w.agent, "·", w.project, "（挂太久，自动消掉）"); return true }
                 if let la, !w.sessionId.isEmpty, (la["session_id"] as? String) == w.sessionId,
                    CLEAR_EVENTS.contains(la["event"] as? String ?? ""),
@@ -455,7 +461,8 @@ final class Engine: @unchecked Sendable {
     static func deviceCfg(_ s: AppSettings, now: Date = Date()) -> [String: Any] {
         let h = Calendar.current.component(.hour, from: now)
         return [
-            "rev": s.rev, "theme": s.theme, "eye": s.eye, "eye_color": s.eyeColor, "bright": s.brightness,
+            "rev": s.rev, "home": s.homeStyle, "alert_secs": s.alertSecs,
+            "theme": s.theme, "eye": s.eye, "eye_color": s.eyeColor, "bright": s.brightness,
             "used": s.showUsed, "clock": s.clock, "blink": s.blink, "look": s.look,
             "sleepy": s.sleepyNight && (h >= 23 || h < 7), "dim_after": s.dimAfter,
             "alert": s.alertLevel, "remind": s.remind, "motion": s.motion, "nod": s.nod, "pitch": s.pitch,

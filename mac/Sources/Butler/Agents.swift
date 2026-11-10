@@ -1,4 +1,4 @@
-// 各个 AI 工具有没有接上 peon-ping（只读检查，不改它们的配置）
+// 各个 AI 工具有没有接上 peon-ping（只读检查，不改它们的配置；只会更新小管家自己带的 Antigravity 转接脚本）
 import AppKit
 import SwiftUI
 
@@ -17,19 +17,47 @@ enum AgentHooks {
         case "Claude Code":
             return read("~/.claude/settings.json").contains("peon-ping") ? .connected : .none
         case "Codex":
-            return read("~/.codex/config.toml").contains("peon") ? .partial : .none   // 还要在 Codex 里信任一次，这里看不出来
+            // 钩子写进了 config.toml，还要你在 Codex 里信任一次；信任后 Codex 会在同一个文件里记下 stop 钩子的指纹
+            let c = read("~/.codex/config.toml")
+            guard c.contains("peon") else { return .none }
+            return c.contains("config.toml:stop:") ? .connected : .partial
         case "Cursor":
             let h = read("~/.cursor/hooks.json")
-            if h.contains("cursor.sh") && h.contains("stop") { return .connected }
-            return h.contains("peon") ? .partial : .none
+            if let d = (try? JSONSerialization.jsonObject(with: Data(h.utf8))) as? [String: Any] {
+                let peon = { (x: Any?) in ((x as? [String: Any])?["command"] as? String ?? "").contains("peon") }
+                if let hooks = d["hooks"] as? [String: Any], let stop = hooks["stop"] as? [Any], stop.contains(where: peon) { return .connected }
+                if let arr = d["hooks"] as? [[String: Any]], arr.contains(where: { $0["event"] as? String == "stop" && peon($0) }) { return .connected }
+            }
+            return h.contains("peon") ? .partial : .none      // 装 peon-ping 时只登记了它自己的小命令，还没有「做完了」
         case "OpenCode":
-            let dir = NSString(string: "~/.config/opencode/plugin").expandingTildeInPath
-            let files = (try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []
-            return files.contains { $0.lowercased().contains("peon") } ? .connected : .none
+            for sub in ["plugins", "plugin"] {
+                let dir = NSString(string: "~/.config/opencode/" + sub).expandingTildeInPath
+                let files = (try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []
+                if files.contains(where: { $0.lowercased().contains("peon") }) { return .connected }
+            }
+            return .none
         case "Antigravity":
+            // Antigravity 2 的正式钩子；也认 peon-ping 自己那个「盯文件」的后台程序
+            if read("~/.gemini/config/hooks.json").contains("antigravity-hook") { return .connected }
             let la = (try? FileManager.default.contentsOfDirectory(atPath: NSString(string: "~/Library/LaunchAgents").expandingTildeInPath)) ?? []
             return la.contains { $0.lowercased().contains("antigravity") && $0.lowercased().contains("peon") } ? .connected : .none
         default: return .none
+        }
+    }
+
+    /// Antigravity 钩子调用的转接脚本：放在应用支持目录，应用挪了位置也不会断
+    static var antigravityHookPath: String {
+        NSString(string: "~/Library/Application Support/StackChan Butler/hooks/antigravity-hook.sh").expandingTildeInPath
+    }
+
+    /// 应用启动时把自带的转接脚本放过去（应用更新后脚本也跟着更新）
+    static func refreshBundledHooks() {
+        guard let src = Bundle.main.url(forResource: "antigravity-hook", withExtension: "sh", subdirectory: "hooks") else { return }
+        let dst = URL(fileURLWithPath: antigravityHookPath)
+        try? FileManager.default.createDirectory(at: dst.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let a = try? Data(contentsOf: src), (try? Data(contentsOf: dst)) != a {
+            try? a.write(to: dst)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dst.path)
         }
     }
 
@@ -40,11 +68,11 @@ enum AgentHooks {
         case "Codex":
             return (t("peon-ping 已经在 Codex 的配置里登记了。打开 Codex，输入 /hooks，找到 peon-ping 那一条，选择信任，就接通了。"), "")
         case "Cursor":
-            return (t("peon-ping 自带 Cursor 适配脚本。按脚本开头的说明，在 ~/.cursor/hooks.json 里加上 stop 和 beforeShellExecution 两条，指向这个脚本。"), "~/.claude/hooks/peon-ping/adapters/cursor.sh")
+            return (t("peon-ping 能直接认 Cursor 的事件。在 ~/.cursor/hooks.json 的 stop 和 beforeSubmitPrompt 里各加一条下面这个命令，然后重开 Cursor。"), "bash ~/.claude/hooks/peon-ping/peon.sh")
         case "OpenCode":
-            return (t("在「终端」里运行下面这条命令，它会给 OpenCode 装一个很小的插件。"), "bash ~/.claude/hooks/peon-ping/adapters/opencode.sh")
+            return (t("在「终端」里运行下面这条命令，它会给 OpenCode 装一个很小的插件。装好后重开 OpenCode。"), "bash ~/.claude/hooks/peon-ping/adapters/opencode.sh")
         case "Antigravity":
-            return (t("Antigravity 没有正式的通知。peon-ping 的适配脚本会盯住它的对话文件，几秒没更新就当作做完了，需要先装 fswatch。"), "bash ~/.claude/hooks/peon-ping/adapters/antigravity.sh")
+            return (t("Antigravity 2 有正式的钩子。小管家带了一个转接脚本，把它登记在 ~/.gemini/config/hooks.json 的 Stop 和 PreInvocation 里（后面加上同名参数），然后重开 Antigravity。"), "sh \"" + AgentHooks.antigravityHookPath + "\" Stop")
         default: return ("", "")
         }
     }

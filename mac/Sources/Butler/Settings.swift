@@ -12,11 +12,13 @@ struct AppSettings: Codable, Equatable {
     var askBeforeUpdate = true
 
     // 屏幕
+    var homeStyle = "B"              // 平时首页：A 轻底栏 / B 眼睛就是额度 / C 说给你听 / D 只有脸
     var theme = "night"              // night / black / warm / light
     var brightness = 70
     var pinned: [String] = ["claude", "codex"]
     var autoThird = true             // 第 3 格自动放最紧张的一家
-    var windowPref = "auto"          // auto / 5h / week
+    var windowPref = "auto"          // 老设置（所有家一起）：auto / 5h / week；没在 subWindow 里单独选的家沿用它
+    var subWindow: [String: String] = [:]   // 每家显示哪个额度：订阅 id → 时间段的 key（QuotaWindow.key）
     var showUsed = false
     var clock = false
     var dimAfter = 30                // 分钟，0 = 从不
@@ -35,8 +37,10 @@ struct AppSettings: Codable, Equatable {
     var kindQuestion = true
     var kindDone = true
     var alertLevel = 1               // 0 轻 1 中 2 强
+    var alertSecs = 5                // 提醒画面停多久（秒），0 = 一直到你回去；停完回到平时的脸，彩灯继续亮
     var remind = 0                   // 分钟，0 = 不再提醒
-    var waitingTTL = 120             // 分钟，0 = 直到处理
+    var doneTTL = 10                 // 「做完了」多久后熄灯（分钟），0 = 等你回去
+    var waitingTTL = 120             // 「要你批准」最多等多久（分钟），0 = 直到处理
     var midPercent = 40
     var lowPercent = 15
     var shakeLow = true
@@ -54,7 +58,7 @@ struct AppSettings: Codable, Equatable {
     var ledBright = 50
     var ledIdle = "#3ddc84"
     var ledAttn = "#ffb020"
-    var touch = 0                    // 0 知道了  1 切换页面  2 什么都不做
+    var touch = 0                    // 平时摸头：0 开心一下  1 切换页面  2 什么都不做（提醒那几秒里摸头总是提前收起）
 
     // 勿扰
     var quietOn = true

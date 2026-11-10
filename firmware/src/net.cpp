@@ -15,7 +15,7 @@ State gState;
 Cfg gCfg;
 volatile bool gOnline = false;
 volatile uint32_t gFetchedAt = 0;
-volatile bool gAckPending = false;
+String gAckId;
 volatile int gOta = -1;
 bool gDemo = false;
 
@@ -86,6 +86,8 @@ static uint32_t hexColor(const char* s, bool& set) {
 bool parseCfg(JsonVariantConst o, Cfg& c) {
   if (!o.is<JsonObjectConst>()) return false;
   c.rev = o["rev"] | c.rev;
+  c.home = (const char*)(o["home"] | c.home.c_str());
+  c.alertSecs = o["alert_secs"] | c.alertSecs;
   c.theme = (const char*)(o["theme"] | c.theme.c_str());
   c.eye = (const char*)(o["eye"] | c.eye.c_str());
   c.name = (const char*)(o["name"] | c.name.c_str());
@@ -162,6 +164,7 @@ bool parseState(const String& body, State& s) {
     Wait w;
     w.id = (const char*)(o["id"] | "");
     w.agent = (const char*)(o["agent"] | "");
+    w.mono = (const char*)(o["mono"] | "");
     w.project = (const char*)(o["project"] | "");
     w.kind = (const char*)(o["kind"] | "");
     w.text = (const char*)(o["text"] | "");
@@ -314,9 +317,20 @@ static void netTask(void*) {
     HTTPClient http;
     http.setConnectTimeout(1500);
     http.setTimeout(3000);
-    if (gAckPending && http.begin(client, url("/ack"))) {
+    xSemaphoreTake(gMux, portMAX_DELAY);
+    String ack = gAckId;
+    xSemaphoreGive(gMux);
+    if (ack.length() && http.begin(client, url("/ack"))) {
+      JsonDocument d;
+      d["id"] = ack;
+      String body;
+      serializeJson(d, body);
       http.addHeader("Content-Type", "application/json");
-      if (http.POST("{\"id\":\"\"}") == 200) gAckPending = false;
+      if (http.POST(body) == 200) {
+        xSemaphoreTake(gMux, portMAX_DELAY);
+        if (gAckId == ack) gAckId = "";
+        xSemaphoreGive(gMux);
+      }
       http.end();
     }
     bool good = false;

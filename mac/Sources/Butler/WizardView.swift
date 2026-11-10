@@ -404,6 +404,7 @@ struct WizardView: View {
     private var look: some View {
         VStack(alignment: .leading, spacing: 14) {
             title(t("选一个配色和眼睛"), t("以后随时可以在设置里换。"))
+            HomeStylePicker()
             HStack(alignment: .top, spacing: 20) {
                 RobotScreen(state: "calm", width: 240)
                 VStack(alignment: .leading, spacing: 12) {

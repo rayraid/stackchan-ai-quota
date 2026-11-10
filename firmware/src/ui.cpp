@@ -1,5 +1,6 @@
 // aihelper 固件 2.0：画面
-// 平时 = A「精致表情」：发光的眼睛 + 底部 3 格额度；AI 等你时 = B：整屏变色 + 大眼睛 + 一行大字。
+// 平时的首页有四种样式（设置里选）：A 轻底栏 / B 眼睛就是额度 / C 说给你听 / D 只有脸。
+// AI 等你时：整屏变色 + 大眼睛 + 一行大字，停几秒（底部细条倒计时）后回到首页，右上角留一个小 logo。
 // 字体是 Noto Sans SC / Inter 截取出来的平滑字体（fonts/*.vlw，见 tools/make_fonts.py）。
 #include "app.h"
 #include "i18n.h"
@@ -140,26 +141,26 @@ static EyeG eyeG(const String& s) {
   return {44, 60, 20};
 }
 // glow = 0 表示不发光；bgc 是眼睛周围的底色（发光和「担心」的切角要用）
-static void eyes(Expr e, int cx, int cy, int gap, uint32_t col, uint32_t glow, uint32_t bgc, const Cfg& c, uint32_t t, bool canLook, float open = 1) {
+static void eyes(Expr e, int cx, int cy, int gap, uint32_t col, uint32_t glow, uint32_t bgc, const Cfg& c, uint32_t t, bool canLook, float open = 1, float sc = 1) {
   float xs[2] = {cx - gap / 2.0f, cx + gap / 2.0f};
-  if (e == E_SLEEP) { for (float x : xs) rrect(x - 20, cy - 3, 40, 6, 3, col); return; }
+  if (e == E_SLEEP) { for (float x : xs) rrect(x - 20 * sc, cy - 3, 40 * sc, 6, 3, col); return; }
   if (e == E_HAPPY) {           // 弯弯的笑眼
     for (float x : xs) {
       const int N = 12;
       float px = 0, py = 0;
       for (int i = 0; i <= N; i++) {
         float a = PI * (1.17f + 0.66f * i / N);
-        float qx = x + 21 * cosf(a), qy = cy + 12 + 21 * sinf(a);
-        if (i) wline(px, py, qx, qy, 5, col);
+        float qx = x + 21 * sc * cosf(a), qy = cy + 12 * sc + 21 * sc * sinf(a);
+        if (i) wline(px, py, qx, qy, 5 * sc, col);
         px = qx; py = qy;
       }
     }
     return;
   }
   EyeG g = eyeG(c.eye);
-  float w = g.w, h = g.h, r = g.r, y0 = cy;
+  float w = g.w * sc, h = g.h * sc, r = g.r * sc, y0 = cy;
   if (e == E_ALERT) { w *= 1.22f; h *= 1.12f; r *= 1.22f; }
-  float dx = (e == E_CALM && canLook && c.look) ? lookDx(t, 9) : 0;
+  float dx = (e == E_CALM && canLook && c.look) ? lookDx(t, 9 * sc) : 0;
   bool blink = c.blink && e != E_ALERT && (t % 4300) > 4140;
   if (open < 1 && !blink) { float nh = std::max(8.0f, h * open); y0 += (h - nh) / 2; h = nh; }   // 犯困：眼睛只睁一半
   if (blink) h = 7;
@@ -214,67 +215,214 @@ static void badge(const Sub& b, int x, int y, int size, bool darkBg) {
   if (!icon(b.id, b.icon, size, x, y, darkBg)) letterTile(b, x, y, size);
 }
 
-// ---------- 平时：底部 3 格额度 ----------
-static void pills(const State& s, const Cfg& c, const Theme& T, const Lv& L, bool grey) {
+// ---------- 首页共用 ----------
+static int rankOf(const String& k) { return k == "approval" ? 0 : k == "question" ? 1 : k == "error" ? 2 : k == "done" ? 3 : k == "restored" ? 4 : 5; }
+// 首页上放哪几家（设置里的第 1/2/3 格；没设就按顺序取）
+static std::vector<const Sub*> faceSubs(const State& s, int maxN) {
   std::vector<const Sub*> v;
   for (auto& id : s.face) if (const Sub* b = findSub(s, id)) v.push_back(b);
-  if (v.empty()) for (auto& b : s.subs) { if (v.size() >= 3) break; v.push_back(&b); }
-  if (v.size() > 3) v.resize(3);
-  int n = v.size();
-  if (!n) return;
-  int w = (304 - 8 * (n - 1)) / n, h = 62, y = 170;
-  for (int i = 0; i < n; i++) {
-    const Sub& b = *v[i];
-    int x = 8 + i * (w + 8);
-    bool na = grey || b.left < 0 || b.stale || !s.ok;
-    uint32_t col = na ? L.na : lvc(L, b.level);
-    int val = b.left < 0 ? -1 : (c.used ? 100 - b.left : b.left);
-    rrect(x, y, w, h, 14, T.panel);
-    badge(b, x + 8, y + 11, 28, !T.light);          // C：大 logo + 数字
-    String num = val < 0 ? String("--") : String(val);
-    int nw = tw(num, N28B);
-    txt(num, x + w - 22 - nw, y + 12, N28B, na ? T.dim : (b.level == "ok" ? T.fg : col));
-    if (val >= 0) txt("%", x + w - 20, y + 24, N15B, T.dim);
-    rrect(x + 10, y + h - 11, w - 20, 5, 2, T.track);
-    if (val > 0) rrect(x + 10, y + h - 11, std::max(5, (w - 20) * val / 100), 5, 2, col);
-  }
+  if (v.empty()) for (auto& b : s.subs) { if ((int)v.size() >= maxN) break; v.push_back(&b); }
+  if ((int)v.size() > maxN) v.resize(maxN);
+  return v;
 }
-static void waitBadge(const State& s, const Theme& T) {
-  if (s.waiting.empty()) return;
-  String t = trf(S_N_WAITING, (int)s.waiting.size());
-  int w = tw(t, F14) + 32;
-  rrect(312 - w, 8, w, 26, 13, mix(T.bg1, 0xffb020, T.light ? .3f : .22f));
-  cv.fillSmoothCircle(312 - w + 13, 21, 4, c565(0xffb020));
-  txt(t, 312 - w + 23, 21, F14, T.light ? 0x6a4500 : 0xffcf6b, textdatum_t::middle_left);
+struct Val { int val; uint32_t col, num; bool na; };      // 显示的数字、条的颜色、数字的颜色
+static Val valOf(const State& s, const Cfg& c, const Theme& T, const Lv& L, const Sub& b, bool grey) {
+  bool na = grey || b.left < 0 || b.stale || !s.ok;
+  int v = b.left < 0 ? -1 : (c.used ? 100 - b.left : b.left);
+  uint32_t col = na ? L.na : lvc(L, b.level);
+  return {v, col, na ? T.dim : (b.level == "ok" ? T.fg : col), na};
+}
+static void numPct(const Val& q, int x, int cy, const lgfx::IFont* nf, const Theme& T, textdatum_t d) {
+  String num = q.val < 0 ? String("--") : String(q.val);
+  int nw = tw(num, nf), pw = q.val < 0 ? 0 : tw("%", F14) + 2;
+  int x0 = d == textdatum_t::middle_right ? x - nw - pw : x;
+  txt(num, x0, cy, nf, q.num, textdatum_t::middle_left);
+  if (q.val >= 0) txt("%", x0 + nw + 2, cy + 4, F14, T.dim, textdatum_t::middle_left);
+}
+// 左上角：时钟，或者数据过期时写「数据停在 HH:MM」
+static void topLeft(const State& s, const Cfg& c, const Theme& T, bool grey) {
+  if (grey) txt(trf(S_STALE_S, s.dataTime.length() ? s.dataTime.c_str() : tr(S_LONG_AGO)), 12, 10, F14, T.dim);
+  else if (c.clock && s.time.length()) txt(s.time, 12, 10, N18, T.dim);
+}
+// 整屏提醒收起后：一个小圆章，里面是在等你的那家 AI 的 logo（没有图标就写字母）
+static void waitMark(const State& s, const Theme& T, int x, int y) {
+  const Wait* w = nullptr;
+  for (auto& x2 : s.waiting) if (!w || rankOf(x2.kind) < rankOf(w->kind) || (rankOf(x2.kind) == rankOf(w->kind) && x2.since < w->since)) w = &x2;
+  if (!w) return;
+  cv.fillSmoothCircle(x, y, 21, c565(0xffb020));
+  cv.fillSmoothCircle(x, y, 18, c565(T.panel));
+  if (!icon(w->iconId, w->iconV, 24, x - 12, y - 12, !T.light))
+    txt(w->mono.length() ? w->mono : w->agent.substring(0, 2), x, y + 1, N15B, T.fg, textdatum_t::middle_center);
+}
+// 首页上的红色小胶囊「只剩 8%」（B、D 用：没常驻显示的那一家快用完时才出现）
+struct Rect { int x, y, w, h; String id; bool hit(int px, int py) const { return w > 0 && px >= x && px < x + w && py >= y && py < y + h; } };
+static Rect gChip;
+static const Low* lowNotIn(const State& s, const std::vector<const Sub*>& shown) {
+  for (auto& l : s.lows) { bool in = false; for (auto* b : shown) if (b->id == l.id) in = true; if (!in) return &l; }
+  return nullptr;
+}
+static void lowChip(const State& s, const Low& l, const Theme& T, const Lv& L, int cy) {
+  String t = trf(S_ONLY_LEFT, l.left);
+  int w = 12 + 20 + 6 + tw(t, F16) + 14, x = 160 - w / 2, y = cy - 15;
+  uint32_t bgc = bgAt(T, cy);
+  rrect(x, y, w, 30, 15, mix(bgc, L.low, .55f));
+  rrect(x + 1.5f, y + 1.5f, w - 3, 27, 13.5f, mix(bgc, L.low, .16f));
+  if (const Sub* b = findSub(s, l.id)) badge(*b, x + 12, cy - 10, 20, !T.light);
+  txt(t, x + 38, cy + 1, F16, L.low, textdatum_t::middle_left);
+  gChip = {x, y, w, 30, l.id};
 }
 
-// ---------- 各个画面 ----------
-static void pageCalm(const State& s, const Cfg& c, const Theme& T, const Lv& L, uint32_t t) {
+// ---------- A 轻底栏：去掉方块，数字像一行小字托在脸下面 ----------
+static int aCenter(int i, int n) { return 160 + (int)lroundf((i - (n - 1) / 2.0f) * 104); }
+static void homeA(const State& s, const Cfg& c, const Theme& T, const Lv& L, uint32_t t, bool grey, Expr e) {
   bgFill(T);
-  eyes(E_CALM, 160, 92, 104, eyeColor(c, T), T.light ? 0 : T.glow, bgAt(T, 92), c, t, true, c.sleepy ? .45f : 1);
-  if (c.sleepy) zz(226, 64, t, T.dim, bgAt(T, 64));
-  if (c.clock && s.time.length()) txt(s.time, 12, 10, N18, T.dim);
-  waitBadge(s, T);
-  pills(s, c, T, L, false);
+  eyes(e, 160, 90, 118, eyeColor(c, T), T.light ? 0 : T.glow, bgAt(T, 90), c, t, true, c.sleepy ? .45f : 1, 1.18f);
+  if (c.sleepy && e == E_CALM) zz(236, 50, t, T.dim, bgAt(T, 50));
+  auto v = faceSubs(s, 3);
+  int n = v.size();
+  for (int i = 0; i < n; i++) {
+    const Sub& b = *v[i];
+    int cx = aCenter(i, n);
+    Val q = valOf(s, c, T, L, b, grey);
+    badge(b, cx - 40, 186, 22, !T.light);
+    numPct(q, cx - 12, 198, N22B, T, textdatum_t::middle_left);
+    rrect(cx - 40, 218, 82, 3, 1.5f, T.track);
+    if (q.val > 0) rrect(cx - 40, 218, std::max(3, 82 * q.val / 100), 3, 1.5f, q.col);
+    if (i < n - 1) cv.fillRect(cx + 52, 188, 1, 26, c565(mix(bgAt(T, 200), T.dim, .25f)));
+  }
 }
-// 顶部彩色卡片（额度快用完、额度没更新）
-static void pageCard(const State& s, const Cfg& c, const Theme& T, const Lv& L, uint32_t t,
-                     uint32_t cb, uint32_t cf, const char* icon, const String& title, const String& sub, Expr e, bool grey) {
+
+// ---------- B 眼睛就是额度：两只眼睛像小水箱，剩多少亮多少 ----------
+static EyeG tankG(const String& e) {
+  if (e == "round") return {84, 84, 42};
+  if (e == "bar") return {38, 100, 19};
+  return {64, 102, 30};
+}
+static const int B_X[2] = {108, 212}, B_CY = 98;
+static void tank(float x, int cy, const EyeG& g, int left, uint32_t fill, uint32_t ec, const Theme& T, bool glow) {
+  uint32_t bgc = bgAt(T, cy);
+  float x0 = x - g.w / 2, y0 = cy - g.h / 2;
+  if (glow) for (int k = 0; k < 2; k++) { float ex = (2 - k) * 2.5f; rrect(x0 - ex, y0 - ex, g.w + 2 * ex, g.h + 2 * ex, g.r + ex, mix(bgc, T.glow, k ? .14f : .08f)); }
+  rrect(x0, y0, g.w, g.h, g.r, mix(bgc, ec, .24f));                                   // 边
+  rrect(x0 + 2, y0 + 2, g.w - 4, g.h - 4, std::max(1.0f, g.r - 2), mix(bgc, ec, .07f));   // 空着的部分
+  if (left > 0) {                       // 亮着的部分：整只眼睛的形状，只露出下面那一截
+    int top = lroundf(y0 + g.h - g.h * std::min(100, left) / 100.0f);
+    cv.setClipRect(lroundf(x0) - 1, top, lroundf(g.w) + 2, lroundf(y0 + g.h) - top + 2);
+    rrect(x0, y0, g.w, g.h, g.r, fill);
+    cv.clearClipRect();
+  }
+}
+static void homeB(const State& s, const Cfg& c, const Theme& T, const Lv& L, uint32_t t, bool grey, Expr e) {
   bgFill(T);
-  eyes(e, 160, 134, 104, eyeColor(c, T), T.light ? 0 : T.glow, bgAt(T, 134), c, t, false);
-  if (e == E_WORRY) sweat(232, 100);
+  uint32_t ec = eyeColor(c, T);
+  auto v = faceSubs(s, 2);
+  EyeG g = tankG(c.eye);
+  float dx = (e == E_CALM && c.look) ? lookDx(t, 7) : 0;
+  bool blink = e == E_CALM && c.blink && (t % 4300) > 4140;
+  if (e == E_HAPPY) eyes(E_HAPPY, 160, 88, 104, ec, 0, 0, c, t, false, 1, 1.4f);
+  for (int i = 0; i < 2; i++) {
+    const Sub* b = i < (int)v.size() ? v[i] : nullptr;
+    Val q = b ? valOf(s, c, T, L, *b, grey) : Val{-1, ec, T.dim, true};
+    uint32_t fill = !b ? ec : q.na ? L.na : (b->level == "low" ? L.low : ec);
+    if (e != E_HAPPY) {
+      if (blink) rrect(B_X[i] + dx - g.w / 2, B_CY - 3.5f, g.w, 7, 3.5f, fill);
+      else tank(B_X[i] + dx, B_CY, g, b ? std::max(0, b->left) : 100, fill, ec, T, !T.light && !q.na);
+    }
+    if (!b) continue;
+    String num = q.val < 0 ? String("--") : String(q.val);
+    int total = 20 + 6 + tw(num, N22B) + 2 + tw("%", F14), x0 = B_X[i] - total / 2;
+    badge(*b, x0, 167, 20, !T.light);
+    numPct(q, x0 + 26, 177, N22B, T, textdatum_t::middle_left);
+  }
+  if (c.sleepy && e == E_CALM) zz(246, 30, t, T.dim, bgAt(T, 30));
+  gChip = {};
+  if (const Low* l = lowNotIn(s, v)) lowChip(s, *l, T, L, 216);
+}
+
+// ---------- C 说给你听：脸在左边，额度在旁边的对话气泡里 ----------
+static const int C_BX = 140, C_BY = 12, C_BW = 172, C_BH = 216;
+static int cRowH(int n) { return n ? std::min(68, (C_BH - 12) / n) : 68; }
+static int cTop0(int n) { return C_BY + (C_BH - n * cRowH(n)) / 2; }
+static void homeC(const State& s, const Cfg& c, const Theme& T, const Lv& L, uint32_t t, bool grey, Expr e) {
+  bgFill(T);
+  eyes(e, 74, 128, 58, eyeColor(c, T), T.light ? 0 : T.glow, bgAt(T, 128), c, t, true, c.sleepy ? .45f : 1, .72f);
+  rrect(C_BX, C_BY, C_BW, C_BH, 18, T.panel);
+  cv.fillTriangle(C_BX + 1, 112, 124, 128, C_BX + 1, 144, c565(T.panel));
+  auto v = faceSubs(s, 3);
+  int n = v.size(), h = cRowH(n), top0 = cTop0(n);
+  for (int i = 0; i < n; i++) {
+    const Sub& b = *v[i];
+    int top = top0 + i * h;
+    Val q = valOf(s, c, T, L, b, grey);
+    badge(b, 154, top + h / 2 - 24, 24, !T.light);
+    numPct(q, 298, top + h / 2 - 12, N28B, T, textdatum_t::middle_right);
+    rrect(154, top + h / 2 + 10, 144, 4, 2, T.track);
+    if (q.val > 0) rrect(154, top + h / 2 + 10, std::max(4, 144 * q.val / 100), 4, 2, q.col);
+    if (i < n - 1) cv.fillRect(154, top + h - 1, 144, 1, c565(mix(T.panel, T.dim, .22f)));
+  }
+}
+
+// ---------- D 只有脸：额度只在快用完时露出来 ----------
+static void homeD(const State& s, const Cfg& c, const Theme& T, const Lv& L, uint32_t t, bool grey, Expr e) {
+  bgFill(T);
+  const Low* l = s.lows.empty() ? nullptr : &s.lows[0];
+  int cy = l ? 96 : 112;
+  eyes(e, 160, cy, 124, eyeColor(c, T), T.light ? 0 : T.glow, bgAt(T, cy), c, t, true, c.sleepy ? .45f : 1, 1.36f);
+  if (c.sleepy && e == E_CALM) zz(250, cy - 62, t, T.dim, bgAt(T, cy - 62));
+  gChip = {};
+  if (l) lowChip(s, *l, T, L, 205);
+}
+
+static void pageHome(const State& s, const Cfg& c, const Theme& T, const Lv& L, uint32_t t, bool grey, bool happy) {
+  Expr e = happy ? E_HAPPY : E_CALM;
+  if (c.home == "A") homeA(s, c, T, L, t, grey, e);
+  else if (c.home == "C") homeC(s, c, T, L, t, grey, e);
+  else if (c.home == "D") homeD(s, c, T, L, t, grey, e);
+  else homeB(s, c, T, L, t, grey, e);
+  topLeft(s, c, T, grey);
+  if (c.home == "C") waitMark(s, T, 74, 66); else waitMark(s, T, 293, 27);
+}
+
+bool uiFaceHit(const State& s, const Cfg& c, int x, int y, String& subId) {
+  if ((c.home == "B" || c.home == "D" || c.home.length() == 0) && gChip.hit(x, y)) { subId = gChip.id; return true; }
+  if (c.home == "A") {
+    auto v = faceSubs(s, 3);
+    if (y < 166 || v.empty()) return false;
+    int best = 0;
+    for (int i = 1; i < (int)v.size(); i++) if (abs(x - aCenter(i, v.size())) < abs(x - aCenter(best, v.size()))) best = i;
+    subId = v[best]->id; return true;
+  }
+  if (c.home == "C") {
+    auto v = faceSubs(s, 3);
+    int n = v.size(), h = cRowH(n), top0 = cTop0(n);
+    if (x < C_BX || y < top0 || y >= top0 + n * h) return false;
+    subId = v[(y - top0) / h]->id; return true;
+  }
+  if (c.home == "D") return false;
+  auto v = faceSubs(s, 2);                 // B：点某只眼睛（连同下面的数字）
+  EyeG g = tankG(c.eye);
+  for (int i = 0; i < (int)v.size(); i++)
+    if (abs(x - B_X[i]) <= std::max(50.0f, g.w / 2 + 16) && y >= 36 && y <= 196) { subId = v[i]->id; return true; }
+  return false;
+}
+
+// 额度快用完：顶部红卡片（亮 1 分钟就收进首页）
+static void pageLow(const State& s, const Cfg& c, const Theme& T, uint32_t t, const Low& l) {
+  bgFill(T);
+  eyes(E_WORRY, 160, 156, 110, eyeColor(c, T), T.light ? 0 : T.glow, bgAt(T, 156), c, t, false, 1, 1.1f);
+  sweat(246, 112);
+  uint32_t cb = LV_DARK.low, cf = 0x2a0606;
   rrect(8, 8, 304, 68, 18, cb);
   cv.fillSmoothCircle(42, 42, 19, c565(cf));
-  txt(icon, 42, 43, N22B, cb, textdatum_t::middle_center);
-  txt(fit(title, 230, F26B), 72, 10, F26B, cf);
-  txt(fit(sub, 230, F16), 72, 46, F16, mix(cb, cf, .8f));
-  pills(s, c, T, L, grey);
+  txt("!", 42, 43, N22B, cb, textdatum_t::middle_center);
+  txt(fit(trf(S_ONLY_LEFT, l.left), 230, F26B), 72, 10, F26B, cf);
+  txt(fit(l.name + " · " + (l.reset.length() ? l.reset : l.label), 230, F16), 72, 46, F16, mix(cb, cf, .8f));
 }
 // 有 AI 在等你：整屏变色
-static void pageAsk(const State& s, const Cfg& c, uint32_t t, uint32_t waited) {
+static void pageAsk(const State& s, const Cfg& c, const UiCtx& u) {
+  uint32_t t = millis();
   const Wait* w = nullptr;
-  int more = 0;
-  for (auto& x : s.waiting) if (!x.acked) { if (!w) w = &x; else more++; }
+  for (auto& x : s.waiting) if (x.id == u.flashId) w = &x;
   if (!w) return;
   const String& k = w->kind;
   bool green = k == "done" || k == "restored";
@@ -298,9 +446,12 @@ static void pageAsk(const State& s, const Cfg& c, uint32_t t, uint32_t waited) {
   txt(fit(title, 308, F38B), 160, 118, F38B, fg, textdatum_t::top_center);
   String sub = w->agent + " · " + (k == "note" ? w->text : w->project);
   txt(fit(sub, 300, F16), 160, 170, F16, mix(bgc, fg, .82f), textdatum_t::top_center);
-  String foot = String(tr(c.touch == 0 ? S_PAT_ACK : S_TAP_ACK)) + " · " + trf(S_WAITED, (unsigned)(waited / 60), (unsigned)(waited % 60));
-  if (more) foot += " · " + trf(S_MORE, more);
-  txt(fit(foot, 304, F14), 160, 206, F14, mix(bgc, fg, .62f), textdatum_t::top_center);
+  // 底部：倒计时细条（停完自己回到首页）；再提醒时上面写已等多久
+  if (u.reminder) txt(trf(S_WAITED, (unsigned)(u.waited / 60), (unsigned)(u.waited % 60)), 160, 196, F14, mix(bgc, fg, .62f), textdatum_t::top_center);
+  if (u.flashLeft >= 0) {
+    rrect(100, 218, 120, 5, 2.5f, mix(bgc, fg, .18f));
+    if (u.flashLeft > 0) rrect(100, 218, std::max(5.0f, 120 * u.flashLeft), 5, 2.5f, mix(bgc, fg, .55f));
+  }
 }
 // 暗下来的画面：连不上、休息、连 WiFi、没配对
 static void pageDark(const Cfg& c, const String& title, const String& sub, const String& sub2, uint32_t t, bool sleepy) {
@@ -348,8 +499,7 @@ int uiListHit(const State& s, int y) {
 static void pageList(const State& s, const Cfg& c, const Theme& T, const Lv& L) {
   bgFill(T);
   txt(tr(c.used ? S_ALL_USED : S_ALL), 12, 8, F18B, T.fg);
-  if (!s.waiting.empty()) waitBadge(s, T);
-  else if (s.ok) {
+  if (s.ok) {
     String t = trf(S_SYNCED, s.time.c_str());
     int w = tw(t, F14);
     cv.fillSmoothCircle(308 - w - 9, 20, 3, c565(lvc(T.light ? LV_LIGHT : LV_DARK, "ok")));
@@ -389,7 +539,6 @@ static void pageDetail(const State& s, const Cfg& c, const Sub& b, const Theme& 
   badge(b, 10, 6, 40, !T.light);
   txt(fit(b.name, 160, F16), 60, 8, F16, T.fg);
   txt(tr(b.stale ? S_STALE_DATA : (c.used ? S_USED : S_LEFT)), 60, 29, F14, T.dim);
-  txt(tr(S_TAP_BACK), 308, 14, F14, T.dim, textdatum_t::top_right);
   int n = std::min((int)b.wins.size(), 4);
   if (!n) { txt(b.error.length() ? b.error : String(tr(S_CANT_READ)), 160, 110, F16, T.dim, textdatum_t::top_center); return; }
   if (n <= 3) {
@@ -429,10 +578,10 @@ void uiRender(const State& s, const Cfg& c, Mode m, const UiCtx& u) {
   useFonts(i18nLang() == L_JA ? FS_JA : FS_ZH);
   const Theme& T = themeOf(c.theme);
   const Lv& L = T.light ? LV_LIGHT : LV_DARK;
-  auto calmPages = [&]() {
+  auto calmPages = [&](bool grey) {
     if (u.page == P_DETAIL) { if (const Sub* b = findSub(s, u.detailId)) { pageDetail(s, c, *b, T, L); return; } }
     if (u.page != P_FACE) { pageList(s, c, T, L); return; }
-    pageCalm(s, c, T, L, t);
+    pageHome(s, c, T, L, t, grey, u.happy);
   };
   switch (m) {
     case M_SETUP: pageSetup(u); break;
@@ -441,19 +590,13 @@ void uiRender(const State& s, const Cfg& c, Mode m, const UiCtx& u) {
     case M_OFF: pageDark(c, tr(S_OFF_T), tr(S_OFF_S), "", t, true); break;
     case M_REST: pageDark(c, tr(S_REST_T), tr(S_REST_S), "", t, true); break;
     case M_UPDATING: pageOta(u.otaProgress); break;
-    case M_ASK: pageAsk(s, c, t, u.waited); break;
-    case M_LOW: {
-      if (u.page != P_FACE || s.lows.empty()) { calmPages(); break; }
-      const Low& l = s.lows[0];
-      String sub = l.name + " · " + (l.reset.length() ? l.reset : l.label);
-      pageCard(s, c, T, L, t, LV_DARK.low, 0x2a0606, "!", trf(S_ONLY_LEFT, l.left), sub, E_WORRY, false);
-    } break;
-    case M_STALE:
-      if (u.page != P_FACE) { calmPages(); break; }
-      pageCard(s, c, T, L, t, T.light ? 0xd9dee5 : 0x2a313c, T.light ? 0x2a313c : 0xc9d0d9, "?", tr(S_STALE_T),
-               trf(S_STALE_S, s.dataTime.length() ? s.dataTime.c_str() : tr(S_LONG_AGO)), E_CALM, true);
+    case M_ASK: pageAsk(s, c, u); break;
+    case M_LOW:
+      if (u.page != P_FACE || s.lows.empty()) calmPages(!s.ok);
+      else pageLow(s, c, T, t, s.lows[0]);
       break;
-    default: calmPages();
+    case M_STALE: calmPages(true); break;      // 数据过期：数字变灰，左上角写「数据停在 HH:MM」
+    default: calmPages(false);
   }
   cv.pushSprite(0, 0);
 }

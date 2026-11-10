@@ -40,6 +40,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/firmware" "$APP/Contents/Resources/esptool"
 cp "$BIN_DIR/Butler" "$APP/Contents/MacOS/$APP_NAME"
 cp Resources/preview.html "$APP/Contents/Resources/"
+mkdir -p "$APP/Contents/Resources/hooks" && cp Resources/hooks/*.sh "$APP/Contents/Resources/hooks/"
 [ -f Resources/AppIcon.icns ] || swift scripts/make_icon.swift Resources/AppIcon.icns
 cp Resources/AppIcon.icns "$APP/Contents/Resources/"
 
