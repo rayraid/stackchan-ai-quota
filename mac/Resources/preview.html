@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>html,body{margin:0;background:transparent;overflow:hidden}canvas{display:block;width:100vw;height:100vh;image-rendering:pixelated}</style>
+</head><body><canvas id="c" width="320" height="240"></canvas>
+<script>
+// 机器人屏幕的预览：和固件 ui.cpp 同样的画法，在小管家的设置和向导里用。
+const CN='"PingFang SC","Hiragino Sans","Hiragino Sans GB",sans-serif';
+const NUM='"Avenir Next","Helvetica Neue",sans-serif';
+let P={icons:{},state:'calm',home:'B',list:'A',detail:'A',detailId:'',alert:'now',theme:'night',eye:'capsule',eyeColor:'',clock:false,used:false,blink:true,look:true,lang:'zh',subs:[],face:[],mid:40,low:15};
+const TXT={
+ zh:{approval:'要你批准',question:'有问题问你',done:'做完了',only:'只剩 %d%',pat:'摸头 = 知道了',waited:'已等 0:42',all:'全部额度',allUsed:'已用额度',synced:'%s 已同步',back:'点屏幕返回',left:'还剩',used:'已用',proj:'aihelper'},
+ ja:{approval:'承認待ち',question:'質問があります',done:'完了しました',only:'残り %d%',pat:'頭をなでる = 了解',waited:'待ち 0:42',all:'残量一覧',allUsed:'使用量一覧',synced:'%s 同期済み',back:'タップで戻る',left:'残り',used:'使用',proj:'aihelper'},
+ en:{approval:'Needs approval',question:'Has a question',done:'Done',only:'Only %d% left',pat:'Pat head = got it',waited:'Waiting 0:42',all:'All quotas',allUsed:'Usage',synced:'Synced %s',back:'Tap to go back',left:'left',used:'used',proj:'aihelper'}};
+const L=()=>TXT[P.lang]||TXT.zh;
+const THEMES={
+ night:{bg1:'#131c2d',bg2:'#090c13',fg:'#eef2f7',dim:'#8b95a3',panel:'#172031',track:'#283143',eye:'#e6f3ff',glow:'rgba(130,195,255,.55)'},
+ black:{bg1:'#000',bg2:'#000',fg:'#f2f2f2',dim:'#8a8a8a',panel:'#131313',track:'#2a2a2a',eye:'#fff',glow:'rgba(255,255,255,.3)'},
+ warm:{bg1:'#251d17',bg2:'#120e0b',fg:'#f7ede3',dim:'#a59686',panel:'#2c231d',track:'#3d322a',eye:'#ffe4bf',glow:'rgba(255,180,110,.5)'},
+ light:{bg1:'#f6f8fb',bg2:'#e2e7ee',fg:'#18212c',dim:'#5f6b7a',panel:'#fff',track:'#d3d9e1',eye:'#1d2633',glow:null}};
+const EYES={capsule:{w:44,h:60,r:20},round:{w:40,h:40,r:20},bar:{w:18,h:58,r:9}};
+const lvc=(t,lv)=>(t==='light'?{ok:'#14a35a',mid:'#c48a00',low:'#e03c3c',na:'#9aa3ae'}:{ok:'#3ddc84',mid:'#f5c542',low:'#ff5d5d',na:'#59636f'})[lv]||'#59636f';
+const lvl=l=>l<P.low?'low':l<P.mid?'mid':'ok';
+function alpha(hex,a){const n=parseInt(hex.slice(1),16);return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`;}
+function rr(c,x,y,w,h,r,f){c.beginPath();c.roundRect(x,y,w,h,Math.max(0,Math.min(r,h/2,w/2)));if(f)c.fillStyle=f;c.fill();}
+function tx(c,s,x,y,px,col,o={}){c.font=`${o.w||500} ${px}px ${o.fam||CN}`;c.fillStyle=col;c.textAlign=o.al||'left';c.textBaseline=o.bl||'top';c.fillText(s,x,y);}
+function fit(c,s,max){if(c.measureText(s).width<=max)return s;const a=[...s];while(a.length&&c.measureText(a.join('')+'…').width>max)a.pop();return a.join('')+'…';}
+function bg(c,T){const g=c.createLinearGradient(0,0,0,240);g.addColorStop(0,T.bg1);g.addColorStop(1,T.bg2);c.fillStyle=g;c.fillRect(0,0,320,240);return g;}
+function lookDx(t,a){const p=(t%9000)/9000;if(p<.2)return 0;if(p<.27)return -a*(p-.2)/.07;if(p<.45)return -a;if(p<.55)return -a+2*a*(p-.45)/.1;if(p<.73)return a;if(p<.8)return a*(1-(p-.73)/.07);return 0;}
+function eyes(c,expr,cx,cy,t,o){
+  const xs=[cx-o.gap/2,cx+o.gap/2];c.save();if(o.glow){c.shadowColor=o.glow;c.shadowBlur=16;}
+  c.fillStyle=o.color;c.strokeStyle=o.color;
+  if(expr==='happy'){const k=o.sc||1;c.lineWidth=10*k;c.lineCap='round';xs.forEach(x=>{c.beginPath();c.arc(x,cy+12*k,21*k,Math.PI*1.17,Math.PI*1.83);c.stroke();});c.restore();return;}
+  const sc=o.sc||1;let {w,h,r}=EYES[P.eye]||EYES.capsule;w*=sc;h*=sc;r*=sc;
+  if(expr==='alert'){w*=1.22;h*=1.12;r*=1.22;}
+  const dx=(expr==='calm'&&P.look)?lookDx(t,9*sc):0, bl=P.blink&&expr!=='alert'&&(t%4300)>4140;
+  if(bl)h=7;
+  xs.forEach((x,i)=>{c.save();
+    if(expr==='worry'&&!bl){const k=.45*h/w,sg=i===0?1:-1,xin=x+sg*w/2,xout=x-sg*w/2,top=cy-h/2,E=30;
+      c.beginPath();c.moveTo(xin+sg*E,top-E*k);c.lineTo(xout-sg*E,top+.45*h+E*k);c.lineTo(xout-sg*E,cy+h);c.lineTo(xin+sg*E,cy+h);c.closePath();c.clip();}
+    rr(c,x-w/2+dx,cy-h/2,w,h,r);c.restore();});
+  c.restore();
+}
+function sub(id){return P.subs.find(s=>s.id===id);}
+const IMGS={};
+function img(id){const u=P.icons&&P.icons[id];if(!u)return null;let im=IMGS[id];if(!im||im.src!==u){im=new Image();im.onload=()=>draw(ctx,performance.now()-t0);im.src=u;IMGS[id]=im;}return im.complete&&im.naturalWidth?im:null;}
+function badge(c,s,x,y,size){const im=img(s.id);if(im){c.imageSmoothingQuality='high';c.drawImage(im,x,y,size,size);return;}
+  rr(c,x,y,size,size,size*.3,s.hue);tx(c,s.mono,x+size/2,y+size/2+1,size*.46,'#0b0e13',{w:800,al:'center',bl:'middle',fam:NUM});}
+// ---------- 首页四种样式（和固件 ui.cpp 的 homeA~homeD 同样的位置） ----------
+function faceSubs(n){let v=P.face.map(sub).filter(Boolean);if(!v.length)v=P.subs.slice(0,n);return v.slice(0,n);}
+function valOf(s){const v=s.left<0?-1:(P.used?100-s.left:s.left),lv=s.left<0?'na':lvl(s.left);return {v,lv,col:lvc(P.theme,lv)};}
+function numPct(c,T,q,x,cy,px,right){const num=q.v<0?'--':String(q.v);c.font=`700 ${px}px ${NUM}`;const nw=c.measureText(num).width;c.font=`600 12px ${NUM}`;
+  const pw=q.v<0?0:c.measureText('%').width+2,x0=right?x-nw-pw:x;
+  tx(c,num,x0,cy,px,q.lv==='ok'?T.fg:(q.lv==='na'?T.dim:q.col),{w:700,fam:NUM,bl:'middle'});if(q.v>=0)tx(c,'%',x0+nw+2,cy+4,12,T.dim,{w:600,fam:NUM,bl:'middle'});}
+function chip(c,T,s,cy){const t=L().only.replace('%d',Math.max(0,s.left));c.font=`600 16px ${CN}`;const w=12+20+6+c.measureText(t).width+14,x=160-w/2,red=lvc(P.theme,'low');
+  rr(c,x,cy-15,w,30,15,alpha(red,.55));rr(c,x+1.5,cy-13.5,w-3,27,13.5,P._bg);rr(c,x+1.5,cy-13.5,w-3,27,13.5,alpha(red,.16));
+  badge(c,s,x+12,cy-10,20);tx(c,t,x+38,cy+1,16,red,{w:600,bl:'middle'});}
+function homeA(c,T,t,ec){eyes(c,'calm',160,90,t,{gap:118,color:ec,glow:T.glow,sc:1.18});const v=faceSubs(3),n=v.length;
+  v.forEach((s,i)=>{const cx=160+(i-(n-1)/2)*104,q=valOf(s);badge(c,s,cx-40,186,22);numPct(c,T,q,cx-12,198,22,false);
+    rr(c,cx-40,218,82,3,1.5,T.track);if(q.v>0)rr(c,cx-40,218,Math.max(3,82*q.v/100),3,1.5,q.col);
+    if(i<n-1){c.fillStyle=alpha('#8b95a3',.25);c.fillRect(cx+52,188,1,26);}});}
+const TANK={capsule:{w:64,h:102,r:30},round:{w:84,h:84,r:42},bar:{w:38,h:100,r:19}};
+function tank(c,T,x,cy,g,left,fill,ec,glow){const x0=x-g.w/2,y0=cy-g.h/2;
+  c.save();if(glow){c.shadowColor=T.glow;c.shadowBlur=12;}rr(c,x0,y0,g.w,g.h,g.r,alpha(ec,.24));c.restore();
+  rr(c,x0+2,y0+2,g.w-4,g.h-4,Math.max(1,g.r-2),P._bg);rr(c,x0+2,y0+2,g.w-4,g.h-4,Math.max(1,g.r-2),alpha(ec,.07));
+  if(left>0){const top=y0+g.h-g.h*Math.min(100,left)/100;c.save();c.beginPath();c.rect(x0-1,top,g.w+2,y0+g.h-top+2);c.clip();rr(c,x0,y0,g.w,g.h,g.r,fill);c.restore();}}
+function homeB(c,T,t,ec){const v=faceSubs(2),g=TANK[P.eye]||TANK.capsule,dx=P.look?lookDx(t,7):0,bl=P.blink&&(t%4300)>4140;
+  [108,212].forEach((x,i)=>{const s=v[i],fill=!s?ec:(s.left>=0&&lvl(s.left)==='low'?lvc(P.theme,'low'):ec);
+    if(bl)rr(c,x+dx-g.w/2,98-3.5,g.w,7,3.5,fill);else tank(c,T,x+dx,98,g,s?Math.max(0,s.left):100,fill,ec,!!T.glow);
+    if(!s)return;const q=valOf(s),num=q.v<0?'--':String(q.v);c.font=`700 22px ${NUM}`;const x0=x-(20+6+c.measureText(num).width+14)/2;
+    badge(c,s,x0,167,20);numPct(c,T,q,x0+26,177,22,false);});
+  const lo=P.subs.find(s=>!v.includes(s)&&s.left>=0&&lvl(s.left)==='low');if(lo)chip(c,T,lo,216);}
+function homeC(c,T,t,ec){eyes(c,'calm',74,128,t,{gap:58,color:ec,glow:T.glow,sc:.72});
+  rr(c,140,12,172,216,18,T.panel);c.beginPath();c.moveTo(141,112);c.lineTo(124,128);c.lineTo(141,144);c.closePath();c.fillStyle=T.panel;c.fill();
+  const v=faceSubs(3),n=v.length,h=n?Math.min(68,Math.floor(204/n)):68,top0=12+Math.floor((216-n*h)/2);
+  v.forEach((s,i)=>{const top=top0+i*h,q=valOf(s);badge(c,s,154,top+h/2-24,24);numPct(c,T,q,298,top+h/2-12,28,true);
+    rr(c,154,top+h/2+10,144,4,2,T.track);if(q.v>0)rr(c,154,top+h/2+10,Math.max(4,144*q.v/100),4,2,q.col);
+    if(i<n-1){c.fillStyle=alpha('#8b95a3',.22);c.fillRect(154,top+h-1,144,1);}});}
+function homeD(c,T,t,ec){const lo=P.subs.find(s=>s.left>=0&&lvl(s.left)==='low'),cy=lo?96:112;
+  eyes(c,'calm',160,cy,t,{gap:124,color:ec,glow:T.glow,sc:1.36});if(lo)chip(c,T,lo,205);}
+// ---------- 全部额度页（A 两列小卡片 / B 一行一家 / C 竖条对比）和明细页（A 大圆环 / B 横条），和固件 ui.cpp 同样的位置 ----------
+const FT={f14:[500,14,CN],f16:[500,16,CN],f18b:[700,18,CN],f26b:[700,26,CN],f38b:[800,38,CN],n15b:[700,15,NUM],n18:[600,18,NUM],n22b:[700,22,NUM],n28b:[700,28,NUM]};
+function fnt(c,f){const[w,px,fam]=FT[f];c.font=`${w} ${px}px ${fam}`;}
+function tf(c,s,x,y,f,col,al='left',bl='middle'){fnt(c,f);c.fillStyle=col;c.textAlign=al;c.textBaseline=bl;c.fillText(s,x,y);}
+function wf(c,s,f){fnt(c,f);return c.measureText(s).width;}
+function ff(c,s,max,f){fnt(c,f);return fit(c,s||'',max);}
+const lvCol=lv=>lvc(P.theme,lv||'ok');
+const numCol=(T,lv)=>(!lv||lv==='ok')?T.fg:lvCol(lv);
+const vOf=x=>x<0?-1:(P.used?100-x:x);
+function numP(c,T,v,x,cy,f,col,al){const s=v<0?'--':String(v),nw=wf(c,s,f),pw=v<0?0:wf(c,'%','f14')+2,w=nw+pw,x0=al==='right'?x-w:al==='center'?x-w/2:x;
+  tf(c,s,x0,cy,f,col);if(v>=0)tf(c,'%',x0+nw+2,cy+FT[f][1]*.17,'f14',P._T.dim);return w;}
+function hbar(c,T,x,y,w,h,v,col){rr(c,x,y,w,h,h/2,T.track);if(v>0)rr(c,x,y,Math.max(h,w*Math.min(100,v)/100),h,h/2,col);}
+function ring(c,T,cx,cy,r,lw,v,col){c.save();c.lineCap='round';c.lineWidth=lw;c.strokeStyle=T.track;c.beginPath();c.arc(cx,cy,r,0,Math.PI*2);c.stroke();
+  if(v>0){c.strokeStyle=col;c.beginPath();c.arc(cx,cy,r,-Math.PI/2,-Math.PI/2+Math.PI*2*Math.min(100,v)/100);c.stroke();}c.restore();}
+const shortLabel=l=>{l=l||'';const i=l.lastIndexOf(' ');return i>=0?l.slice(i+1):l;};
+function hhmm(){const d=new Date();return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');}
+// 顶部标题栏：‹ 全部额度（点这里回首页），右边同步时间
+function chevron(c,T,x,cy){c.save();c.strokeStyle=T.dim;c.lineWidth=2.2;c.lineCap='round';c.lineJoin='round';c.beginPath();c.moveTo(x+5,cy-6);c.lineTo(x,cy);c.lineTo(x+5,cy+6);c.stroke();c.restore();}
+function listHeader(c,T){chevron(c,T,12,19);tf(c,P.used?L().allUsed:L().all,24,19,'f18b',T.fg);
+  const s=L().synced.replace('%s',hhmm());const w=wf(c,s,'f14');tf(c,s,308,20,'f14',T.dim,'right');
+  c.beginPath();c.arc(308-w-9,20,3,0,7);c.fillStyle=lvCol('ok');c.fill();}
+const LIST={
+ A(c,T){listHeader(c,T);const subs=P.subs.slice(0,6),n=subs.length,rows=Math.ceil(n/2),gap=8,h=Math.floor((196-(rows-1)*gap)/Math.max(1,rows));
+  subs.forEach((s,i)=>{const r=Math.floor(i/2),wide=(n%2===1&&i===n-1),x=wide?8:(i%2?164:8),w=wide?304:148,y=40+r*(h+gap),v=vOf(s.left),lv=s.left<0?'na':(s.level||lvl(s.left));
+   rr(c,x,y,w,h,12,T.panel);
+   if(lv==='low'){c.save();c.strokeStyle=alpha(lvCol('low'),.75);c.lineWidth=1.5;c.beginPath();c.roundRect(x+.75,y+.75,w-1.5,h-1.5,11.5);c.stroke();c.restore();}
+   badge(c,s,x+10,y+5,20);tf(c,ff(c,s.name,w-46,'f14'),x+36,y+15,'f14',T.dim);
+   numP(c,T,v,x+10,y+h-19,'n28b',numCol(T,lv),'left');
+   tf(c,ff(c,shortLabel(s.label),64,'f14'),x+w-10,y+h-17,'f14',T.dim,'right');
+   hbar(c,T,x+10,y+h-6,w-20,3,v,lv==='na'?T.dim:lvCol(lv));});},
+ B(c,T){listHeader(c,T);const subs=P.subs.slice(0,6),n=subs.length,h=196/Math.max(1,n);
+  subs.forEach((s,i)=>{const cy=40+i*h+h/2-4,v=vOf(s.left),lv=s.left<0?'na':(s.level||lvl(s.left));
+   badge(c,s,12,cy-12,24);const nm=ff(c,s.name,120,'f16'),nw=wf(c,nm,'f16');tf(c,nm,48,cy-3,'f16',T.fg);
+   tf(c,ff(c,s.label,150-nw,'f14'),48+nw+8,cy-2,'f14',T.dim);
+   numP(c,T,v,308,cy-3,'n22b',numCol(T,lv),'right');hbar(c,T,48,cy+12,260,4,v,lv==='na'?T.dim:lvCol(lv));});},
+ C(c,T){listHeader(c,T);const subs=P.subs.slice(0,6),n=subs.length,cw=304/Math.max(1,n);
+  subs.forEach((s,i)=>{const cx=8+cw*i+cw/2,v=vOf(s.left),lv=s.left<0?'na':(s.level||lvl(s.left)),top=72,bh=104,bw=Math.min(34,cw-22);
+   numP(c,T,v,cx,56,'n22b',numCol(T,lv),'center');rr(c,cx-bw/2,top,bw,bh,10,T.panel);
+   if(v>0){const fh=Math.max(10,bh*Math.min(100,v)/100);rr(c,cx-bw/2,top+bh-fh,bw,fh,10,lv==='na'?T.dim:lvCol(lv));}
+   badge(c,s,cx-12,186,24);tf(c,ff(c,shortLabel(s.label),cw-4,'f14'),cx,222,'f14',T.dim,'center');});}
+};
+// 明细页 A 的大圆环：周期最短的那个（一样短的取剩得少的）
+function heroIndex(ws){let h=0;ws.forEach((w,i)=>{const a=w.mins||1e9,b=ws[h].mins||1e9;if(a<b||(a===b&&w.left>=0&&w.left<ws[h].left))h=i;});return h;}
+function paceLines(p){const m=(p||'').match(/^(.*?)(\d.*)$/);return m?[m[1],m[2]]:[p];}
+function detHeader(c,T,s){chevron(c,T,12,24);badge(c,s,24,10,28);tf(c,ff(c,s.name,170,'f18b'),60,24,'f18b',T.fg);
+  tf(c,P.used?L().used:L().left,308,24,'f14',T.dim,'right');}
+const DETAIL={
+ A(c,T,s){detHeader(c,T,s);const ws=(s.windows||[]).slice(0,4);if(!ws.length)return;const hi=heroIndex(ws),w=ws[hi],v=vOf(w.left);
+  ring(c,T,82,118,50,10,v,lvCol(w.level));numP(c,T,v,82,119,'n28b',T.fg,'center');
+  tf(c,ff(c,w.label,150,'f16'),82,190,'f16',T.fg,'center');tf(c,ff(c,w.reset,150,'f14'),82,212,'f14',T.dim,'center');
+  const rest=ws.filter((_,i)=>i!==hi);
+  if(!rest.length){tf(c,ff(c,w.reset||'—',140,'f16'),168,96,'f16',T.fg);
+   if(w.pace){const p=paceLines(w.pace);tf(c,ff(c,p[0],140,'f14'),168,132,'f14',lvCol('mid'));if(p[1])tf(c,ff(c,p[1],140,'f16'),168,154,'f16',lvCol('mid'));}return;}
+  const h=Math.min(58,170/rest.length);
+  rest.forEach((x,i)=>{const y=60+i*h,xv=vOf(x.left);tf(c,ff(c,x.label,92,'f14'),168,y+8,'f14',T.fg);
+   numP(c,T,xv,308,y+8,'n18',numCol(T,x.level),'right');hbar(c,T,168,y+22,140,4,xv,lvCol(x.level));
+   if(h>=48)tf(c,ff(c,x.reset,140,'f14'),168,y+38,'f14',T.dim);});},
+ B(c,T,s){detHeader(c,T,s);const ws=(s.windows||[]).slice(0,4),n=ws.length;if(!n)return;
+  if(n===1){const w=ws[0],v=vOf(w.left);tf(c,ff(c,w.label,150,'f16'),12,80,'f16',T.fg);tf(c,ff(c,w.reset,160,'f14'),12,104,'f14',T.dim);
+   numP(c,T,v,308,90,'n28b',numCol(T,w.level),'right');hbar(c,T,12,126,296,10,v,lvCol(w.level));
+   if(w.pace)tf(c,ff(c,w.pace,296,'f14'),12,160,'f14',lvCol('mid'));return;}
+  const h=184/n,big=h>=56;
+  ws.forEach((w,i)=>{const y=52+i*h,v=vOf(w.left),lab=ff(c,w.label,150,'f16'),lw=wf(c,lab,'f16');tf(c,lab,12,y+10,'f16',T.fg);
+   tf(c,ff(c,w.reset,200-lw,'f14'),12+lw+8,y+11,'f14',T.dim);
+   numP(c,T,v,308,y+10,big?'n28b':'n22b',numCol(T,w.level),'right');hbar(c,T,12,y+(big?32:27),296,big?8:6,v,lvCol(w.level));});}
+};
+// ---------- 提醒画面 B 柔和变色 / C 脸 + 底部卡片（和固件 pageAsk 同样的位置） ----------
+const AK={approval:{c:'#ffb020',fg:'#1b1300',m:'!',e:'alert'},question:{c:'#5ab8ff',fg:'#04192b',m:'?',e:'alert'},done:{c:'#3ddc84',fg:'#04210f',m:'✓',e:'happy'}};
+function akMark(c,K,x,y,r){c.beginPath();c.arc(x,y,r,0,7);c.fillStyle='#fff';c.fill();
+  if(K.m==='✓'){c.save();c.strokeStyle=K.fg;c.lineWidth=2.4;c.lineCap='round';c.beginPath();c.moveTo(x-r*.45,y);c.lineTo(x-r*.1,y+r*.38);c.lineTo(x+r*.5,y-r*.38);c.stroke();c.restore();}
+  else tf(c,K.m,x,y+1,'n15b',K.fg,'center');}
+function darker(h,k){const n=parseInt(h.slice(1),16),f=v=>Math.round(v*(1-k));return `rgb(${f(n>>16&255)},${f(n>>8&255)},${f(n&255)})`;}
+function alertB(c,st,t){const K=AK[st],ai=img('alert');const g=c.createLinearGradient(0,0,0,240);g.addColorStop(0,K.c);g.addColorStop(1,darker(K.c,.28));c.fillStyle=g;c.fillRect(0,0,320,240);
+  c.beginPath();c.arc(28,26,16,0,7);c.fillStyle=K.fg;c.fill();if(ai)c.drawImage(ai,17,15,22,22);tf(c,'Claude Code',52,26,'f16',K.fg);akMark(c,K,296,26,12);
+  eyes(c,K.e,160,86,t,{gap:92,color:K.fg,sc:.82});fnt(c,'f38b');tf(c,fit(c,L()[st],300),160,148,'f38b',K.fg,'center');tf(c,L().proj,160,190,'f16',alpha(K.fg,.85),'center');
+  c.fillStyle=alpha(K.fg,.16);c.fillRect(0,234,320,6);c.fillStyle=alpha(K.fg,.6);c.fillRect(0,234,320*.6,6);}
+function alertC(c,st,t){const T=THEMES[P.theme]||THEMES.night,K=AK[st],ai=img('alert');bg(c,T);
+  eyes(c,K.e,160,60,t,{gap:100,color:P.eyeColor||T.eye,glow:T.glow,sc:.86});
+  rr(c,10,116,300,114,20,K.c);c.beginPath();c.arc(48,168,27,0,7);c.fillStyle=K.fg;c.fill();if(ai)c.drawImage(ai,32,152,32,32);akMark(c,K,70,190,10);
+  fnt(c,'f26b');tf(c,fit(c,L()[st],210),90,152,'f26b',K.fg);tf(c,'Claude Code · '+L().proj,90,184,'f14',alpha(K.fg,.78));
+  rr(c,24,212,272,4,2,alpha(K.fg,.18));rr(c,24,212,272*.6,4,2,alpha(K.fg,.55));}
+function draw(c,t){
+  const T=THEMES[P.theme]||THEMES.night,eyeCol=P.eyeColor||T.eye,st=P.state;
+  if(st==='approval'||st==='done'||st==='question'){
+    if(P.alert==='B'){alertB(c,st,t);return;}
+    if(P.alert==='C'){alertC(c,st,t);return;}
+    const bgc=st==='done'?'#3ddc84':'#ffb020',fg=st==='done'?'#04210f':'#1b1300';
+    c.fillStyle=bgc;c.fillRect(0,0,320,240);
+    eyes(c,st==='done'?'happy':'alert',160,74,t,{gap:100,color:fg});
+    const ai=img('alert');
+    if(ai){c.beginPath();c.arc(270,40,27,0,7);c.fillStyle=fg;c.fill();c.drawImage(ai,256,26,28,28);
+      c.beginPath();c.arc(290,62,11,0,7);c.fillStyle='#fff';c.fill();tx(c,st==='done'?'✓':st==='approval'?'!':'?',290,63,15,fg,{w:800,al:'center',bl:'middle',fam:NUM});}
+    else if(st!=='done')tx(c,st==='approval'?'!':'?',268,22,38,fg,{w:800,al:'center',fam:NUM});
+    c.font=`800 38px ${CN}`;tx(c,fit(c,L()[st],308),160,120,38,fg,{w:800,al:'center'});
+    tx(c,'Claude Code · '+L().proj,160,172,17,alpha(fg,.82),{al:'center'});
+    rr(c,100,218,120,5,2.5,alpha(fg,.18));rr(c,100,218,72,5,2.5,alpha(fg,.55));return;}
+  const g=bg(c,T);P._bg=g;P._T=T;
+  if(st==='list'){(LIST[P.list]||LIST.A)(c,T);return;}
+  if(st==='detail'){const s=P.subs.find(x=>x.id===P.detailId)||P.subs.find(x=>(x.windows||[]).length>2)||P.subs.find(x=>(x.windows||[]).length>1)||P.subs[0];
+    if(s)(DETAIL[P.detail]||DETAIL.A)(c,T,s);return;}
+  if(st==='low'){
+    const s=[...P.subs].sort((a,b)=>a.left-b.left)[0]||{name:'AI',left:8,reset:''};
+    eyes(c,'worry',160,156,t,{gap:110,color:eyeCol,glow:null,sc:1.1});
+    rr(c,8,8,304,68,18,'#ff5d5d');c.beginPath();c.arc(42,42,19,0,7);c.fillStyle='#2a0606';c.fill();
+    tx(c,'!',42,43,22,'#ff5d5d',{w:800,al:'center',bl:'middle',fam:NUM});
+    tx(c,L().only.replace('%d',Math.max(0,s.left)),72,12,25,'#2a0606',{w:700});
+    c.font=`500 16px ${CN}`;tx(c,fit(c,s.name+' · '+(s.reset||''),230),72,46,16,alpha('#2a0606',.8));return;}
+  ({A:homeA,C:homeC,D:homeD}[P.home]||homeB)(c,T,t,eyeCol);
+  if(P.clock){const d=new Date();tx(c,String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'),12,10,18,T.dim,{w:600,fam:NUM});}
+}
+const cv=document.getElementById('c'),ctx=cv.getContext('2d'),t0=performance.now();
+function frame(){draw(ctx,performance.now()-t0);requestAnimationFrame(frame);}
+window.render=o=>{Object.assign(P,o);draw(ctx,performance.now()-t0);};
+requestAnimationFrame(frame);
+</script></body></html>
