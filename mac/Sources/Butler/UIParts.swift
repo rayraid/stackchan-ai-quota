@@ -181,7 +181,7 @@ enum IconCache {
         guard !v.isEmpty else { return nil }
         let key = "\(id)|\(v)|\(dark)"
         if let i = images[key] { return i }
-        let i = IconStore.image(id, dark: dark)
+        let i = IconStore.normalizedImage(id, dark: dark)
         images[key] = i
         return i
     }

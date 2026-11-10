@@ -46,6 +46,7 @@ enum IconStore {
             }
         }
         if parts.isEmpty { return "" }
+        parts.append("trim3")       // 画法变了就换一个，机器人会重新来取
         let h = SHA256.hash(data: Data(parts.joined(separator: ";").utf8))
         return h.prefix(4).map { String(format: "%02x", $0) }.joined()
     }
@@ -87,20 +88,58 @@ enum IconStore {
         return "data:image/png;base64," + png.base64EncodedString()
     }
 
-    private static func render(_ img: NSImage, size: Int) -> NSBitmapImageRep? {
-        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: size, pixelsHigh: size, bitsPerSample: 8, samplesPerPixel: 4,
-                                         hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: size * 4, bitsPerPixel: 32) else { return nil }
+    /// 把图片画进 side×side 的透明画布：整张图按比例缩放后，再按 (scale, center) 放大、平移
+    private static func draw(_ img: NSImage, side: Int, scale: CGFloat = 1, center: CGPoint? = nil) -> NSBitmapImageRep? {
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8, samplesPerPixel: 4,
+                                         hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: side * 4, bitsPerPixel: 32) else { return nil }
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
         NSGraphicsContext.current?.imageInterpolation = .high
         NSColor.clear.set()
-        NSRect(x: 0, y: 0, width: size, height: size).fill()
-        let w = max(img.size.width, 1), h = max(img.size.height, 1)
-        let k = min(CGFloat(size) / w, CGFloat(size) / h)
-        let dw = w * k, dh = h * k
-        img.draw(in: NSRect(x: (CGFloat(size) - dw) / 2, y: (CGFloat(size) - dh) / 2, width: dw, height: dh), from: .zero, operation: .sourceOver, fraction: 1)
+        NSRect(x: 0, y: 0, width: side, height: side).fill()
+        let s = CGFloat(side), w = max(img.size.width, 1), h = max(img.size.height, 1)
+        let k = min(s / w, s / h)
+        var r = NSRect(x: (s - w * k) / 2, y: (s - h * k) / 2, width: w * k, height: h * k)
+        if let c = center {      // c 是「内容的中心」，用 0~1 表示（相对整张画布）；挪到正中再放大
+            r = NSRect(x: (r.minX / s - c.x) * scale * s + s / 2, y: (r.minY / s - c.y) * scale * s + s / 2,
+                       width: r.width * scale, height: r.height * scale)
+        }
+        img.draw(in: r, from: .zero, operation: .sourceOver, fraction: 1)
         NSGraphicsContext.restoreGraphicsState()
         return rep
+    }
+
+    /// 各家官网的 logo 四周留白差别很大（OpenAI 的结只占画布六成），直接缩放会一个大一个小。
+    /// 这里先找出不透明的部分、去掉四周的空白，再按「看起来一样大」放进去：
+    /// 圆形、镂空的 logo 放满，实心方块类的（不透明部分占满自己外框的）缩小一点，免得显得更大。
+    private static func render(_ img: NSImage, size: Int) -> NSBitmapImageRep? {
+        let P = 256
+        guard let probe = draw(img, side: P), let px = probe.bitmapData else { return draw(img, side: size) }
+        var x0 = P, y0 = P, x1 = -1, y1 = -1, ink = 0
+        for y in 0..<P {
+            for x in 0..<P where px[y * probe.bytesPerRow + x * 4 + 3] > 16 {
+                ink += 1
+                x0 = min(x0, x); x1 = max(x1, x); y0 = min(y0, y); y1 = max(y1, y)
+            }
+        }
+        guard x1 >= x0, y1 >= y0 else { return draw(img, side: size) }
+        let bw = CGFloat(x1 - x0 + 1), bh = CGFloat(y1 - y0 + 1)
+        let coverage = CGFloat(ink) / (bw * bh)                       // 外框里有多少是实心的
+        let solid = min(1, max(0, (coverage - 0.5) / 0.45))
+        let square = min(bw, bh) / max(bw, bh)                        // 越接近正方形，实心时看起来越大
+        let fill = 0.98 - 0.18 * solid * square * square              // 放满到画布的几成
+        let scale = fill * CGFloat(P) / max(bw, bh)
+        // 位图的行是从上往下数的，画图坐标是从下往上
+        let center = CGPoint(x: (CGFloat(x0) + bw / 2) / CGFloat(P), y: 1 - (CGFloat(y0) + bh / 2) / CGFloat(P))
+        return draw(img, side: size, scale: scale, center: center)
+    }
+
+    /// 给 Mac 界面用：和机器人上一样去掉留白、统一大小
+    static func normalizedImage(_ id: String, dark: Bool) -> NSImage? {
+        guard let img = image(id, dark: dark), let rep = render(img, size: 128) else { return nil }
+        let out = NSImage(size: NSSize(width: 64, height: 64))
+        out.addRepresentation(rep)
+        return out
     }
 
     // ---------- 用户自己选图片 / 换回字母 ----------
