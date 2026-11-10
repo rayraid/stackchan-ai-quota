@@ -8,6 +8,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AppModel.shared.start()
             AppModel.shared.refresh()
             if let dir = ProcessInfo.processInfo.environment["BUTLER_SNAPSHOT"] { Snapshot.run(dir) }
+            if ProcessInfo.processInfo.environment["BUTLER_FETCH_ICONS"] != nil {   // 开发调试：拉官方图标后退出
+                Task {
+                    await IconStore.fetchOfficial { b, ok in if let ok { print(b, ok ? "ok" : "fail") } }
+                    NSApp.terminate(nil)
+                }
+            }
         }
     }
 }

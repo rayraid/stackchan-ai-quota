@@ -35,7 +35,10 @@ enum Snapshot {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5 + Double(i) * 0.5) {
                 let m = AppModel.shared
                 let subs: [[String: Any]] = m.subs.map { ["id": $0.id, "name": $0.name, "mono": $0.mono, "hue": $0.hue, "left": $0.shown?.left ?? -1, "label": $0.shown?.label ?? "", "reset": $0.shown?.reset ?? ""] }
-                let p: [String: Any] = ["state": st, "subs": subs, "face": m.engine.faceIds(m.subs, m.settings), "lang": m.lang.rawValue, "blink": false]
+                var icons: [String: String] = [:]
+                for s in m.subs { if let u = IconStore.pngDataURL(s.id, size: 56, dark: true) { icons[s.id] = u } }
+                if let u = IconStore.pngDataURL("claude", size: 56, dark: true) { icons["alert"] = u }
+                let p: [String: Any] = ["state": st, "subs": subs, "face": m.engine.faceIds(m.subs, m.settings), "lang": m.lang.rawValue, "blink": false, "icons": icons]
                 let js = String(data: try! JSONSerialization.data(withJSONObject: p), encoding: .utf8)!
                 web.evaluateJavaScript("render(\(js))") { _, _ in
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {

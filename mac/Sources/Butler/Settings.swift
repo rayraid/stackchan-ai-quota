@@ -76,6 +76,7 @@ struct AppSettings: Codable, Equatable {
     var subHidden: [String] = []
     var subMono: [String: String] = [:]
     var subHue: [String: String] = [:]
+    var showIcons = true             // 有图标时，机器人和菜单栏用图标代替字母
 
     // 连接
     var port = 8787

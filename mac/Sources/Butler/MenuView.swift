@@ -87,10 +87,17 @@ struct MenuView: View {
         VStack(spacing: 6) {
             ForEach(model.waiting) { w in
                 HStack(spacing: 10) {
-                    Text(w.kind == "done" || w.kind == "restored" ? "✓" : w.kind == "question" ? "?" : "!")
-                        .font(.system(size: 13, weight: .heavy)).foregroundStyle(.white)
-                        .frame(width: 26, height: 26)
-                        .background(Circle().fill(w.kind == "done" || w.kind == "restored" ? Color.green : Color.orange))
+                    ZStack(alignment: .bottomTrailing) {
+                        let iid = IconStore.idForAgent(w.agent)
+                        if model.settings.showIcons && IconStore.has(iid) {
+                            BrandBadge(id: iid, mono: w.mono, hue: "#aab2bd", size: 26)
+                        } else {
+                            Text(w.kind == "done" || w.kind == "restored" ? "✓" : w.kind == "question" ? "?" : "!")
+                                .font(.system(size: 13, weight: .heavy)).foregroundStyle(.white)
+                                .frame(width: 26, height: 26)
+                                .background(Circle().fill(w.kind == "done" || w.kind == "restored" ? Color.green : Color.orange))
+                        }
+                    }
                     VStack(alignment: .leading, spacing: 1) {
                         Text("\(w.agent) · \(kindTitle(w.kind))").font(.system(size: 13, weight: .semibold))
                         Text("\(w.project) · " + t("已等 %@", waited(w.since))).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -128,7 +135,7 @@ struct MenuView: View {
             }
             ForEach(subs) { s in
                 HStack(spacing: 8) {
-                    MonoBadge(mono: s.mono, hue: s.hue)
+                    BrandBadge(id: s.id, mono: s.mono, hue: s.hue)
                     Text(s.name).font(.system(size: 13)).lineLimit(1)
                     Text(s.shown?.label ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     Spacer(minLength: 6)

@@ -174,15 +174,17 @@ static void eyes(Expr e, int cx, int cy, int gap, uint32_t col, uint32_t glow, u
       static M5Canvas sp(&cv);
       int W = lroundf(w) + 2, H = lroundf(h) + 2;
       if (sp.width() != W || sp.height() != H) { sp.deleteSprite(); sp.setColorDepth(16); sp.createSprite(W, H); }
-      sp.fillScreen(c565(bgc));
+      int X0 = lroundf(x - w / 2) - 1, Y0 = lroundf(y0 - h / 2) - 1;
+      for (int j = 0; j < H; j++) for (int q = 0; q < W; q++) sp.drawPixel(q, j, cv.readPixel(X0 + q, Y0 + j));   // 背景原样拷过来（渐变也对得上）
+      uint16_t cutc = cv.readPixel(i == 0 ? X0 : X0 + W - 1, Y0 + (int)(.2f * h));
       sp.fillSmoothRoundRect(1, 1, W - 2, H - 2, lroundf(r), c565(col));
       float sg = i == 0 ? 1 : -1, xin = 1 + (sg > 0 ? w : 0), xout = 1 + (sg > 0 ? 0 : w), top = 1, k = .45f * h / w;
       float ax = xin + sg * 6, ay = top - 6 * k, bx = xout - sg * 6, by = top + .45f * h + 6 * k;
       float vx = bx - ax, vy = by - ay, len = sqrtf(vx * vx + vy * vy), nx = vy / len, ny = -vx / len;
       if (ny > 0) { nx = -nx; ny = -ny; }
       const float R = 14;
-      sp.drawWideLine(lroundf(ax + nx * R), lroundf(ay + ny * R), lroundf(bx + nx * R), lroundf(by + ny * R), R, c565(bgc));
-      sp.pushSprite(lroundf(x - w / 2) - 1, lroundf(y0 - h / 2) - 1);
+      sp.drawWideLine(lroundf(ax + nx * R), lroundf(ay + ny * R), lroundf(bx + nx * R), lroundf(by + ny * R), R, cutc);
+      sp.pushSprite(X0, Y0);
     } else rrect(x - w / 2, y0 - h / 2, w, h, r, col);
   }
 }
@@ -196,6 +198,21 @@ static void sweat(int x, int y) {
   cv.fillSmoothCircle(x, y + 11, 5, c565(0x6ec1ff));
 }
 static uint32_t eyeColor(const Cfg& c, const Theme& T) { return c.eyeColorSet ? c.eyeColor : T.eye; }
+
+// ---------- 图标（官方 logo，由小管家发来；没有就画字母方块） ----------
+static bool icon(const String& id, const String& ver, int size, int x, int y, bool darkBg) {
+  const uint8_t* px = iconGet(id, ver, size, darkBg);
+  if (!px) return false;
+  cv.pushAlphaImage(x, y, size, size, (const lgfx::argb8888_t*)px);
+  return true;
+}
+static void letterTile(const Sub& b, int x, int y, int size) {
+  rrect(x, y, size, size, size * 0.3f, b.hue);
+  txt(b.mono, x + size / 2, y + size / 2 + 1, size >= 36 ? N22B : N15B, 0x0b0e13, textdatum_t::middle_center);
+}
+static void badge(const Sub& b, int x, int y, int size, bool darkBg) {
+  if (!icon(b.id, b.icon, size, x, y, darkBg)) letterTile(b, x, y, size);
+}
 
 // ---------- 平时：底部 3 格额度 ----------
 static void pills(const State& s, const Cfg& c, const Theme& T, const Lv& L, bool grey) {
@@ -213,11 +230,11 @@ static void pills(const State& s, const Cfg& c, const Theme& T, const Lv& L, boo
     uint32_t col = na ? L.na : lvc(L, b.level);
     int val = b.left < 0 ? -1 : (c.used ? 100 - b.left : b.left);
     rrect(x, y, w, h, 14, T.panel);
-    txt(b.mono, x + 11, y + 8, N15B, na ? T.dim : b.hue);
-    txt(fit(c.used ? String(tr(S_USED)) : shortLabel(b.label), w - 46, F14), x + w - 10, y + 8, F14, T.dim, textdatum_t::top_right);
+    badge(b, x + 8, y + 11, 28, !T.light);          // C：大 logo + 数字
     String num = val < 0 ? String("--") : String(val);
-    txt(num, x + 10, y + 22, N28B, na ? T.dim : (b.level == "ok" ? T.fg : col));
-    if (val >= 0) txt("%", x + 12 + tw(num, N28B), y + 34, N15B, T.dim);
+    int nw = tw(num, N28B);
+    txt(num, x + w - 22 - nw, y + 12, N28B, na ? T.dim : (b.level == "ok" ? T.fg : col));
+    if (val >= 0) txt("%", x + w - 20, y + 24, N15B, T.dim);
     rrect(x + 10, y + h - 11, w - 20, 5, 2, T.track);
     if (val > 0) rrect(x + 10, y + h - 11, std::max(5, (w - 20) * val / 100), 5, 2, col);
   }
@@ -266,8 +283,17 @@ static void pageAsk(const State& s, const Cfg& c, uint32_t t, uint32_t waited) {
   cv.fillScreen(c565(bgc));
   Expr e = green ? E_HAPPY : k == "error" ? E_WORRY : E_ALERT;
   eyes(e, 160, 72, 100, fg, 0, bgc, c, t, false);
-  if (k == "approval") txt("!", 268, 22, F38B, fg, textdatum_t::top_center);
-  if (k == "question") txt("?", 268, 22, F38B, fg, textdatum_t::top_center);
+  // 右上角：举着对方的 logo（像来电显示），小圆点里是 ! ? ✓
+  cv.fillSmoothCircle(270, 40, 27, c565(fg));
+  if (icon(w->iconId, w->iconV, 28, 256, 26, true)) {
+    cv.fillSmoothCircle(290, 62, 11, c565(0xffffff));
+    if (green) { wline(284, 62, 288, 66, 1.8f, fg); wline(288, 66, 296, 57, 1.8f, fg); }
+    else txt(k == "question" ? "?" : "!", 290, 63, N15B, fg, textdatum_t::middle_center);
+  } else {
+    cv.fillSmoothCircle(270, 40, 27, c565(bgc));      // 没有图标：照旧只画 ! 或 ?
+    if (k == "approval") txt("!", 268, 22, F38B, fg, textdatum_t::top_center);
+    if (k == "question") txt("?", 268, 22, F38B, fg, textdatum_t::top_center);
+  }
   String title = tr(k == "approval" ? S_APPROVAL : k == "question" ? S_QUESTION : k == "done" ? S_DONE : k == "error" ? S_ERROR : k == "restored" ? S_RESTORED : S_NOTE);
   txt(fit(title, 308, F38B), 160, 118, F38B, fg, textdatum_t::top_center);
   String sub = w->agent + " · " + (k == "note" ? w->text : w->project);
@@ -337,8 +363,7 @@ static void pageList(const State& s, const Cfg& c, const Theme& T, const Lv& L) 
     uint32_t col = na ? L.na : lvc(L, b.level);
     int val = b.left < 0 ? -1 : (c.used ? 100 - b.left : b.left);
     cv.drawFastHLine(12, y, 296, c565(mix(bgAt(T, y), T.dim, .22f)));
-    rrect(12, cy - 13, 26, 26, 8, b.hue);
-    txt(b.mono, 25, cy + 1, N15B, 0x0b0e13, textdatum_t::middle_center);
+    badge(b, 11, cy - 14, 28, !T.light);
     txt(fit(b.name, 120, F16), 48, cy - 19, F16, T.fg);
     txt(fit(b.left < 0 ? (b.error.length() ? b.error : String(tr(S_CANT_READ))) : b.label, 122, F14), 48, cy + 1, F14, T.dim);
     rrect(176, cy - 3, 58, 6, 3, T.track);
@@ -361,10 +386,9 @@ static void ring(int cx, int cy, int r, int val, uint32_t col, const Theme& T) {
 }
 static void pageDetail(const State& s, const Cfg& c, const Sub& b, const Theme& T, const Lv& L) {
   bgFill(T);
-  rrect(12, 12, 32, 32, 10, b.hue);
-  txt(b.mono, 28, 29, N15B, 0x0b0e13, textdatum_t::middle_center);
-  txt(fit(b.name, 160, F16), 54, 8, F16, T.fg);
-  txt(tr(b.stale ? S_STALE_DATA : (c.used ? S_USED : S_LEFT)), 54, 29, F14, T.dim);
+  badge(b, 10, 6, 40, !T.light);
+  txt(fit(b.name, 160, F16), 60, 8, F16, T.fg);
+  txt(tr(b.stale ? S_STALE_DATA : (c.used ? S_USED : S_LEFT)), 60, 29, F14, T.dim);
   txt(tr(S_TAP_BACK), 308, 14, F14, T.dim, textdatum_t::top_right);
   int n = std::min((int)b.wins.size(), 4);
   if (!n) { txt(b.error.length() ? b.error : String(tr(S_CANT_READ)), 160, 110, F16, T.dim, textdatum_t::top_center); return; }

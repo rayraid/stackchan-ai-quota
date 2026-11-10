@@ -45,6 +45,8 @@ Mac 上的小管家是一个很小的 HTTP 服务，机器人每 2 秒来取一�
 ```
 
 - `face`：平时画面底部 3 格依次显示哪几家，小管家按设置算好（2 家固定 + 1 格最紧张的）。
+- `subs[].icon`：这一家图标的版本号，空 = 没有图标（机器人画字母方块）。
+- `waiting[].icon` / `waiting[].icon_v`：提醒画面右上角「来电徽章」用哪一家的图标、版本号。
 - `subs[].left/label/level/reset`：已经按「每家显示哪个时间段」「黄色/红色提醒线」算好，机器人直接画。
 - `waiting`：已经按「哪些 AI 工具」「哪些情况」过滤好。
 - `rest`：小管家告诉机器人「Mac 要睡觉了」。之后连不上时，机器人安静地睡觉，不显示「连不上 Mac」。
@@ -93,6 +95,7 @@ Mac 上的小管家是一个很小的 HTTP 服务，机器人每 2 秒来取一�
 | `POST /event` | 发一条测试提醒（向导里的「试一下」） |
 | `POST /ntfy/<topic>` | 接收 peon-ping 的推送 |
 | `GET /firmware.bin` | 新固件（机器人收到 `ota` 命令后来取，带口令） |
+| `GET /icon?id=claude&s=28&bg=dark` | 图标：`s`×`s` 像素，每个像素 4 字节 B、G、R、A（不预乘）；`bg` 是图标所在的底色（`dark` / `light`），决定用 logo 的哪个版本 |
 | `GET /health` | 不要口令，只回 `{"ok": true}` |
 
 局域网里的请求都要带口令（`?t=` 或 `Authorization: Bearer`），本机访问不需要。

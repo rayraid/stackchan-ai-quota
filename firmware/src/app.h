@@ -8,8 +8,8 @@
 #define FW_VERSION "2.0.0"
 
 struct Win  { String label, level, reset, pace; int left = 0; };
-struct Sub  { String id, name, mono, label, level, reset, error; uint32_t hue = 0xaab2bd; int left = -1; bool stale = false; std::vector<Win> wins; };
-struct Wait { String id, agent, project, kind, text; uint32_t since = 0; bool acked = false; };
+struct Sub  { String id, name, mono, label, level, reset, error, icon; uint32_t hue = 0xaab2bd; int left = -1; bool stale = false; std::vector<Win> wins; };
+struct Wait { String id, agent, project, kind, text, iconId, iconV; uint32_t since = 0; bool acked = false; };
 struct Low  { String id, name, label, reset; int left = 0; };
 
 // 机器人上的设置（小管家随状态下发，见 docs/protocol.md）
@@ -64,6 +64,8 @@ String netSsid();
 String netInfo();
 bool parseState(const String& body, State& s);
 bool parseCfg(JsonVariantConst o, Cfg& c);
+// 图标：向小管家要，存在内存里。还没拿到时返回 nullptr（同时排队去取）。每个像素 B、G、R、A
+const uint8_t* iconGet(const String& id, const String& ver, int size, bool darkBg);
 
 // ---------- ui.cpp：画面 ----------
 struct UiCtx {

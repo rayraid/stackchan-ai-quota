@@ -404,6 +404,7 @@ final class Engine: @unchecked Sendable {
             "data_time": latest > 0 ? hm.string(from: Date(timeIntervalSince1970: latest)) : "",
             "subs": subs.map { sub -> [String: Any] in
                 var d: [String: Any] = ["id": sub.id, "name": sub.name, "mono": sub.mono, "hue": sub.hue, "ts": Int(sub.ts), "stale": sub.stale,
+                                        "icon": s.showIcons ? IconStore.version(sub.id) : "",
                                         "windows": sub.windows.map { ["label": $0.label, "left": $0.left, "level": $0.level, "reset": $0.reset, "pace": $0.pace] }]
                 if let w = sub.shown {
                     d["left"] = w.left; d["label"] = w.label; d["level"] = w.level; d["reset"] = w.reset; d["pace"] = w.pace; d["error"] = ""
@@ -415,8 +416,12 @@ final class Engine: @unchecked Sendable {
             "face": faceIds(subs, s),
             "lows": lows,
             "waiting": wait.map { w -> [String: Any] in
-                ["id": w.id, "agent": w.agent, "mono": w.mono, "project": w.project, "kind": w.kind,
-                 "text": Gen.kindText(w.kind, detail: w.detail, l), "since": Int(w.since), "acked": w.acked]
+                let iid = s.showIcons ? IconStore.idForAgent(w.kind == "restored" ? "" : w.agent) : ""
+                let rid = w.kind == "restored" ? (subs.first { $0.name == w.agent }?.id ?? "") : iid
+                let v = s.showIcons ? IconStore.version(rid) : ""
+                return ["id": w.id, "agent": w.agent, "mono": w.mono, "project": w.project, "kind": w.kind,
+                        "text": Gen.kindText(w.kind, detail: w.detail, l), "since": Int(w.since), "acked": w.acked,
+                        "icon": v.isEmpty ? "" : rid, "icon_v": v]
             },
             "rest": rest && s.restWhenLocked,
             "cfg": Engine.deviceCfg(s, now: now),

@@ -6,7 +6,7 @@
 // 机器人屏幕的预览：和固件 ui.cpp 同样的画法，在小管家的设置和向导里用。
 const CN='"PingFang SC","Hiragino Sans","Hiragino Sans GB",sans-serif';
 const NUM='"Avenir Next","Helvetica Neue",sans-serif';
-let P={state:'calm',theme:'night',eye:'capsule',eyeColor:'',clock:false,used:false,blink:true,look:true,lang:'zh',subs:[],face:[],mid:40,low:15};
+let P={icons:{},state:'calm',theme:'night',eye:'capsule',eyeColor:'',clock:false,used:false,blink:true,look:true,lang:'zh',subs:[],face:[],mid:40,low:15};
 const TXT={
  zh:{approval:'要你批准',question:'有问题问你',done:'做完了',only:'只剩 %d%',pat:'摸头 = 知道了',waited:'已等 0:42',all:'全部额度',allUsed:'已用额度',synced:'已同步',back:'点屏幕返回',left:'还剩',used:'已用',proj:'aihelper'},
  ja:{approval:'承認待ち',question:'質問があります',done:'完了しました',only:'残り %d%',pat:'頭をなでる = 了解',waited:'待ち 0:42',all:'残量一覧',allUsed:'使用量一覧',synced:'同期済み',back:'タップで戻る',left:'残り',used:'使用',proj:'aihelper'},
@@ -41,16 +41,19 @@ function eyes(c,expr,cx,cy,t,o){
   c.restore();
 }
 function sub(id){return P.subs.find(s=>s.id===id);}
+const IMGS={};
+function img(id){const u=P.icons&&P.icons[id];if(!u)return null;let im=IMGS[id];if(!im||im.src!==u){im=new Image();im.onload=()=>draw(ctx,performance.now()-t0);im.src=u;IMGS[id]=im;}return im.complete&&im.naturalWidth?im:null;}
+function badge(c,s,x,y,size){const im=img(s.id);if(im){c.imageSmoothingQuality='high';c.drawImage(im,x,y,size,size);return;}
+  rr(c,x,y,size,size,size*.3,s.hue);tx(c,s.mono,x+size/2,y+size/2+1,size*.46,'#0b0e13',{w:800,al:'center',bl:'middle',fam:NUM});}
 function pills(c,T,grey){
   let v=P.face.map(sub).filter(Boolean);if(!v.length)v=P.subs.slice(0,3);v=v.slice(0,3);
   const n=v.length;if(!n)return;const w=(304-8*(n-1))/n;
   v.forEach((s,i)=>{const x=8+i*(w+8),y=170,h=62,lv=lvl(s.left),col=grey?lvc(P.theme,'na'):lvc(P.theme,lv);
     const val=s.left<0?-1:(P.used?100-s.left:s.left);
     rr(c,x,y,w,h,14,T.panel);
-    tx(c,s.mono,x+11,y+8,15,s.hue,{w:700,fam:NUM});
-    c.font=`500 14px ${CN}`;const lab=P.used?L().used:(s.label||'').split(' ').pop();tx(c,fit(c,lab,w-46),x+w-10,y+9,14,T.dim,{al:'right'});
+    badge(c,s,x+8,y+11,28);
     const num=val<0?'--':String(val);c.font=`700 27px ${NUM}`;const nw=c.measureText(num).width;
-    tx(c,num,x+10,y+23,27,lv==='ok'?T.fg:col,{w:700,fam:NUM});if(val>=0)tx(c,'%',x+12+nw,y+33,14,T.dim,{w:600,fam:NUM});
+    tx(c,num,x+w-22-nw,y+12,27,lv==='ok'?T.fg:col,{w:700,fam:NUM});if(val>=0)tx(c,'%',x+w-20,y+24,13,T.dim,{w:600,fam:NUM});
     rr(c,x+10,y+h-10,w-20,5,2.5,T.track);if(val>0)rr(c,x+10,y+h-10,Math.max(5,(w-20)*val/100),5,2.5,col);});
 }
 function draw(c,t){
@@ -59,7 +62,10 @@ function draw(c,t){
     const bgc=st==='done'?'#3ddc84':'#ffb020',fg=st==='done'?'#04210f':'#1b1300';
     c.fillStyle=bgc;c.fillRect(0,0,320,240);
     eyes(c,st==='done'?'happy':'alert',160,74,t,{gap:100,color:fg});
-    if(st!=='done')tx(c,st==='approval'?'!':'?',268,22,38,fg,{w:800,al:'center',fam:NUM});
+    const ai=img('alert');
+    if(ai){c.beginPath();c.arc(270,40,27,0,7);c.fillStyle=fg;c.fill();c.drawImage(ai,256,26,28,28);
+      c.beginPath();c.arc(290,62,11,0,7);c.fillStyle='#fff';c.fill();tx(c,st==='done'?'✓':st==='approval'?'!':'?',290,63,15,fg,{w:800,al:'center',bl:'middle',fam:NUM});}
+    else if(st!=='done')tx(c,st==='approval'?'!':'?',268,22,38,fg,{w:800,al:'center',fam:NUM});
     c.font=`800 38px ${CN}`;tx(c,fit(c,L()[st],308),160,120,38,fg,{w:800,al:'center'});
     tx(c,'Claude Code · '+L().proj,160,172,17,alpha(fg,.82),{al:'center'});
     tx(c,L().pat+' · '+L().waited,160,208,14,alpha(fg,.62),{al:'center'});return;}
@@ -69,7 +75,7 @@ function draw(c,t){
     const n=Math.min(P.subs.length,6),h=n?200/n:200;
     P.subs.slice(0,6).forEach((s,i)=>{const y=40+i*h,cy=y+h/2,lv=lvl(s.left),col=lvc(P.theme,lv),val=s.left<0?-1:(P.used?100-s.left:s.left);
       c.fillStyle=alpha('#8b95a3',.18);c.fillRect(12,y,296,1);
-      rr(c,12,cy-13,26,26,8,s.hue);tx(c,s.mono,25,cy+1,12,'#0b0e13',{w:800,al:'center',bl:'middle',fam:NUM});
+      badge(c,s,11,cy-14,28);
       c.font=`600 16px ${CN}`;tx(c,fit(c,s.name,118),48,cy-18,16,T.fg,{w:600});c.font=`500 14px ${CN}`;tx(c,fit(c,s.label||'',122),48,cy+2,14,T.dim);
       rr(c,176,cy-3,58,6,3,T.track);if(val>0)rr(c,176,cy-3,Math.max(6,58*val/100),6,3,col);
       tx(c,val<0?'--':val+'%',308,cy+1,22,lv==='ok'?T.fg:col,{w:700,al:'right',bl:'middle',fam:NUM});});return;}

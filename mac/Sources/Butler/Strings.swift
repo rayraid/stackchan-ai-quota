@@ -123,6 +123,12 @@ let JA: [String: String] = [
     "小提示": "ヒント", "摸机器人的头 = 「知道了」。": "ロボットの頭をなでる = 「了解」。", "装好了": "準備完了",
     "以后在屏幕右上角菜单栏的小机器人图标里找到我。": "画面右上のメニューバーにある小さなロボットのアイコンから開けます。",
     "夜里 %@ 到 %@ 默认勿扰，可以在设置里改。": "夜 %@ 〜 %@ はおやすみモードです。設定で変えられます。",
+    // 图标
+    "选择图片…": "画像を選ぶ…", "用字母": "文字に戻す", "点右边的色点可以换成自己的图片、换回字母，或者改字母的颜色。": "右の色の点から、好きな画像にしたり、文字に戻したり、文字の色を変えたりできます。", "字母颜色": "文字の色",
+    "用图标代替字母": "文字の代わりにアイコンを使う", "正在获取…": "取得中…", "从官网获取官方图标": "公式サイトから公式アイコンを取得", "官方图标": "公式アイコン",
+    "从 Anthropic、OpenAI、Cursor、OpenCode、Google 的官网品牌素材里取 logo，只存在这台 Mac 上，显示在你自己的机器人和菜单栏里。": "Anthropic・OpenAI・Cursor・OpenCode・Google の公式ブランド素材からロゴを取得します。この Mac にだけ保存され、あなたのロボットとメニューバーに表示されます。",
+    "正在下载…": "ダウンロード中…", "已获取": "取得済み", "没取到": "取得できませんでした", "图标": "アイコン",
+    "这些 logo 是各公司的商标，小管家不带、也不上传。": "これらのロゴは各社の商標です。StackChan Butler には含まれず、アップロードもしません。",
     "中文": "日本語", "还有 %d 个": "ほか %d 件",
 ]
 
@@ -248,5 +254,11 @@ let EN: [String: String] = [
     "小提示": "Tip", "摸机器人的头 = 「知道了」。": "Pat the robot's head = \"Got it\".", "装好了": "All set",
     "以后在屏幕右上角菜单栏的小机器人图标里找到我。": "Find me under the little robot icon in the menu bar.",
     "夜里 %@ 到 %@ 默认勿扰，可以在设置里改。": "Do Not Disturb runs %@–%@ by default. Change it in Settings.",
+    // 图标
+    "选择图片…": "Choose Image…", "用字母": "Use Letters", "点右边的色点可以换成自己的图片、换回字母，或者改字母的颜色。": "Use the color dot on the right to choose your own image, switch back to letters, or change the letter color.", "字母颜色": "Letter color",
+    "用图标代替字母": "Use icons instead of letters", "正在获取…": "Fetching…", "从官网获取官方图标": "Get Official Icons", "官方图标": "Official icons",
+    "从 Anthropic、OpenAI、Cursor、OpenCode、Google 的官网品牌素材里取 logo，只存在这台 Mac 上，显示在你自己的机器人和菜单栏里。": "Downloads logos from the official brand assets of Anthropic, OpenAI, Cursor, OpenCode and Google. They stay on this Mac and appear on your own robot and menu bar.",
+    "正在下载…": "Downloading…", "已获取": "Done", "没取到": "Failed", "图标": "Icons",
+    "这些 logo 是各公司的商标，小管家不带、也不上传。": "These logos are trademarks of their owners. StackChan Butler doesn't ship or upload them.",
     "中文": "English", "还有 %d 个": "+%d more",
 ]

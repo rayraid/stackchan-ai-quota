@@ -371,7 +371,7 @@ struct WizardView: View {
             VStack(spacing: 0) {
                 ForEach(model.subs) { s in
                     HStack {
-                        MonoBadge(mono: s.mono, hue: s.hue)
+                        BrandBadge(id: s.id, mono: s.mono, hue: s.hue)
                         Text(s.name)
                         Spacer()
                         Toggle("", isOn: Binding(get: { !model.settings.subHidden.contains(s.id) }, set: { on in

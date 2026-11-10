@@ -53,8 +53,15 @@ struct RobotPreview: NSViewRepresentable {
             ["id": sub.id, "name": sub.name, "mono": sub.mono, "hue": sub.hue,
              "left": sub.shown?.left ?? -1, "label": sub.shown?.label ?? "", "reset": sub.shown?.reset ?? ""]
         }
+        var icons: [String: String] = [:]
+        if s.showIcons {
+            for id in model.subs.map({ $0.id }) + ["claude"] where icons[id] == nil {
+                if let u = IconStore.pngDataURL(id, size: 56, dark: s.theme != "light") { icons[id] = u }
+            }
+            if let u = IconStore.pngDataURL("claude", size: 56, dark: true) { icons["alert"] = u }
+        }
         var p: [String: Any] = [
-            "state": state, "theme": s.theme, "eye": s.eye, "eyeColor": s.eyeColor, "clock": s.clock, "used": s.showUsed,
+            "state": state, "theme": s.theme, "icons": icons, "eye": s.eye, "eyeColor": s.eyeColor, "clock": s.clock, "used": s.showUsed,
             "blink": s.blink, "look": s.look, "lang": model.lang.rawValue, "subs": subs,
             "face": model.engine.faceIds(model.subs, s), "mid": s.midPercent, "low": s.lowPercent,
         ]
@@ -125,6 +132,35 @@ struct MonoBadge: View {
             .foregroundStyle(Color(hex: "#0b0e13"))
             .frame(width: size, height: size)
             .background(RoundedRectangle(cornerRadius: size * 0.28).fill(Color(hex: hue)))
+    }
+}
+
+/// 图标：有官方 logo 就用 logo，没有就用字母方块
+struct BrandBadge: View {
+    var id: String
+    var mono: String
+    var hue: String
+    var size: CGFloat = 22
+    @ObservedObject var model = AppModel.shared
+    var body: some View {
+        if model.settings.showIcons, let img = IconCache.image(id, dark: model.isDark) {
+            Image(nsImage: img).resizable().interpolation(.high).scaledToFit().frame(width: size, height: size)
+        } else {
+            MonoBadge(mono: mono, hue: hue, size: size)
+        }
+    }
+}
+
+enum IconCache {
+    nonisolated(unsafe) private static var images: [String: NSImage] = [:]
+    static func image(_ id: String, dark: Bool) -> NSImage? {
+        let v = IconStore.version(id)
+        guard !v.isEmpty else { return nil }
+        let key = "\(id)|\(v)|\(dark)"
+        if let i = images[key] { return i }
+        let i = IconStore.image(id, dark: dark)
+        images[key] = i
+        return i
     }
 }
 

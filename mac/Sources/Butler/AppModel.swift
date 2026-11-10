@@ -111,6 +111,13 @@ final class AppModel: ObservableObject {
         case ("GET", "/state"):
             if !r.isLocal { engine.seenDevice(ip: r.remoteIP, query: r.query) }
             return .json(engine.state(forDevice: !r.isLocal))
+        case ("GET", "/icon"):
+            // 机器人来取图标：每个像素 B、G、R、A
+            let size = min(64, max(8, Int(r.query["s"] ?? "28") ?? 28))
+            guard let d = IconStore.bgra(r.query["id"] ?? "", size: size, dark: (r.query["bg"] ?? "dark") != "light") else {
+                return .json(["error": "没有这个图标"], status: 404)
+            }
+            return HTTPResponse(status: 200, contentType: "application/octet-stream", body: d)
         case ("GET", "/firmware.bin"):
             let u = Flasher.firmwareDir.appendingPathComponent("firmware.bin")
             guard let d = try? Data(contentsOf: u) else { return .json(["error": "没有固件"], status: 404) }
@@ -161,6 +168,26 @@ final class AppModel: ObservableObject {
         subs.filter { !$0.hidden && $0.shown != nil && !$0.stale }.min { ($0.shown?.left ?? 101) < ($1.shown?.left ?? 101) }
     }
     var quietNow: Bool { Engine.quietNow(settings) }
+    /// 菜单栏、设置是不是深色外观（决定用 logo 的深色版还是浅色版）
+    var isDark: Bool { NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua }
+    @Published var iconProgress: [String: Bool?] = [:]
+    @Published var fetchingIcons = false
+    func fetchIcons() {
+        fetchingIcons = true
+        iconProgress = [:]
+        Task {
+            await IconStore.fetchOfficial { brand, ok in
+                DispatchQueue.main.async { self.iconProgress[brand] = .some(ok) }
+            }
+            await MainActor.run {
+                self.fetchingIcons = false
+                self.settings.showIcons = true
+                self.refresh()
+                self.objectWillChange.send()
+                log("官方图标获取完成：", self.iconProgress.map { "\($0.key)=\($0.value.map { $0 ? "ok" : "失败" } ?? "…")" }.joined(separator: " "))
+            }
+        }
+    }
     func snooze(hours: Double) { settings.dndUntil = Date().addingTimeInterval(hours * 3600) }
     func snoozeUntilMorning() {
         let cal = Calendar.current

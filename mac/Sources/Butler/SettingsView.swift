@@ -450,7 +450,7 @@ struct DataPage: View {
                     ForEach(model.subs) { s in
                         HStack(spacing: 10) {
                             Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
-                            MonoBadge(mono: s.mono, hue: s.hue)
+                            BrandBadge(id: s.id, mono: s.mono, hue: s.hue)
                             Text(s.name).frame(minWidth: 110, alignment: .leading)
                             Spacer()
                             Text(t("简称")).foregroundStyle(.secondary).font(.caption)
@@ -458,8 +458,11 @@ struct DataPage: View {
                                 model.settings.subMono[s.id] = String(v.uppercased().prefix(2))
                             })).frame(width: 40).multilineTextAlignment(.center)
                             Menu {
+                                Button(t("选择图片…")) { pickIcon(s.id) }
+                                Button(t("用字母")) { IconStore.remove(s.id); model.refresh(); model.objectWillChange.send() }
+                                Divider()
                                 ForEach(["#e08a63", "#7c9cff", "#cfd4dc", "#5fd3bc", "#b28cff", "#8ab4ff", "#9be29b", "#ffd27a", "#ff8fb1"], id: \.self) { c in
-                                    Button { model.settings.subHue[s.id] = c } label: { Text(c) }
+                                    Button { model.settings.subHue[s.id] = c } label: { Text(t("字母颜色") + " " + c) }
                                 }
                             } label: { Circle().fill(Color(hex: s.hue)).frame(width: 16, height: 16) }
                                 .menuStyle(.borderlessButton).frame(width: 34)
@@ -476,7 +479,25 @@ struct DataPage: View {
                     }
                 }
                 .frame(minHeight: CGFloat(max(1, model.subs.count)) * 34 + 10)
-            } header: { Text(t("订阅（拖动排序）")) }
+            } header: { Text(t("订阅（拖动排序）")) } footer: { Text(t("点右边的色点可以换成自己的图片、换回字母，或者改字母的颜色。")) }
+            Section {
+                Toggle(t("用图标代替字母"), isOn: $model.settings.showIcons)
+                LabeledContent {
+                    Button(model.fetchingIcons ? t("正在获取…") : t("从官网获取官方图标")) { model.fetchIcons() }.disabled(model.fetchingIcons)
+                } label: {
+                    Text(t("官方图标"))
+                    Text(t("从 Anthropic、OpenAI、Cursor、OpenCode、Google 的官网品牌素材里取 logo，只存在这台 Mac 上，显示在你自己的机器人和菜单栏里。"))
+                }
+                if !model.iconProgress.isEmpty {
+                    ForEach(IconStore.sources, id: \.brand) { src in
+                        if let st = model.iconProgress[src.brand] {
+                            LabeledContent(src.brand) {
+                                Text(st == nil ? t("正在下载…") : st! ? t("已获取") : t("没取到")).foregroundStyle(st == false ? .red : .secondary)
+                            }
+                        }
+                    }
+                }
+            } header: { Text(t("图标")) } footer: { Text(t("这些 logo 是各公司的商标，小管家不带、也不上传。")) }
             Section {
                 LabeledContent {
                     Button(authorizing ? t("请在弹出的窗口里点「始终允许」…") : t("重新授权…")) {
@@ -486,6 +507,17 @@ struct DataPage: View {
                 } label: { Text(t("Claude 读不到时")); Text(t("会弹出钥匙串窗口，点「始终允许」")) }
             }
         }.formStyle(.grouped)
+    }
+}
+
+extension DataPage {
+    func pickIcon(_ id: String) {
+        let p = NSOpenPanel()
+        p.allowedContentTypes = [.png, .svg, .jpeg]
+        if p.runModal() == .OK, let u = p.url, IconStore.importImage(id, from: u) {
+            model.settings.showIcons = true
+            model.refresh(); model.objectWillChange.send()
+        }
     }
 }
 

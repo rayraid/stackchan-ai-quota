@@ -145,6 +145,7 @@ bool parseState(const String& body, State& s) {
     b.hue = hexColor(o["hue"] | "#aab2bd", set);
     b.left = o["left"].isNull() ? -1 : o["left"].as<int>();
     b.stale = o["stale"] | false;
+    b.icon = (const char*)(o["icon"] | "");
     for (JsonObject w : o["windows"].as<JsonArray>()) {
       Win x;
       x.label = (const char*)(w["label"] | "");
@@ -166,6 +167,8 @@ bool parseState(const String& body, State& s) {
     w.text = (const char*)(o["text"] | "");
     w.since = (uint32_t)(o["since"] | 0.0);
     w.acked = o["acked"] | false;
+    w.iconId = (const char*)(o["icon"] | "");
+    w.iconV = (const char*)(o["icon_v"] | "");
     s.waiting.push_back(w);
   }
   for (JsonObject o : doc["lows"].as<JsonArray>()) {
@@ -192,6 +195,36 @@ bool parseState(const String& body, State& s) {
   }
   return true;
 }
+
+// ---------- 图标 ----------
+struct IconEntry { String key; uint8_t* px; };
+static std::vector<IconEntry> gIcons;              // 拿到的图标（不释放：图标很小，换得也少）
+static std::vector<String> gIconWant;              // 要去取的
+static std::vector<std::pair<String, uint32_t>> gIconFail;   // 取失败的，1 分钟后再试
+static SemaphoreHandle_t gIconMux = xSemaphoreCreateMutex();
+
+const uint8_t* iconGet(const String& id, const String& ver, int size, bool darkBg) {
+  if (!id.length() || !ver.length()) return nullptr;
+  String key = id + "|" + ver + "|" + String(size) + "|" + (darkBg ? "d" : "l");
+  const uint8_t* found = nullptr;
+  xSemaphoreTake(gIconMux, portMAX_DELAY);
+  for (auto& e : gIcons) if (e.key == key) { found = e.px; break; }
+  if (!found) {
+    bool queued = false, failed = false;
+    for (auto& k : gIconWant) if (k == key) queued = true;
+    for (auto& f : gIconFail) if (f.first == key && millis() - f.second < 60000) failed = true;
+    if (!queued && !failed && gIconWant.size() < 16) gIconWant.push_back(key);
+  }
+  xSemaphoreGive(gIconMux);
+  return found;
+}
+static String part(const String& s, int i) {
+  int a = 0;
+  for (int k = 0; k < i; k++) { a = s.indexOf('|', a); if (a < 0) return ""; a++; }
+  int b = s.indexOf('|', a);
+  return b < 0 ? s.substring(a) : s.substring(a, b);
+}
+static bool fetchOneIcon();
 
 // ---------- 找小管家 ----------
 static bool discover() {
@@ -271,9 +304,11 @@ static void netTask(void*) {
       delay(200);
       WiFi.begin(gLink.ssid.c_str(), gLink.pass.c_str());
     }
+    if (gDemo && WiFi.status() == WL_CONNECTED && netHasToken() && gBridgeIp != IPAddress((uint32_t)0)) { for (int i = 0; i < 8 && fetchOneIcon(); i++) {} vTaskDelay(pdMS_TO_TICKS(300)); continue; }
     if (gDemo || WiFi.status() != WL_CONNECTED || !netHasToken()) { gOnline = false; vTaskDelay(pdMS_TO_TICKS(500)); continue; }
     if (!gMdnsUp) { gMdnsUp = MDNS.begin("stackchan"); }
     if (gWantOta) { gWantOta = false; doOta(); continue; }
+    for (int i = 0; i < 8 && fetchOneIcon(); i++) {}     // 缺的图标一次取完
     if (gBridgeIp == IPAddress((uint32_t)0) || fails >= 5) { discover(); if (fails >= 5) fails = 3; }
     WiFiClient client;
     HTTPClient http;
@@ -309,6 +344,47 @@ static void netTask(void*) {
 }
 
 void netRequestOta() { gWantOta = true; }
+
+static bool fetchOneIcon() {
+  String key;
+  xSemaphoreTake(gIconMux, portMAX_DELAY);
+  if (!gIconWant.empty()) key = gIconWant.front();
+  xSemaphoreGive(gIconMux);
+  if (!key.length()) return false;
+  String id = part(key, 0);
+  int size = part(key, 2).toInt();
+  bool dark = part(key, 3) == "d";
+  size_t want = (size_t)size * size * 4;
+  uint8_t* px = nullptr;
+  WiFiClient client;
+  HTTPClient http;
+  http.setConnectTimeout(1500);
+  http.setTimeout(4000);
+  String u = url("/icon") + "&id=" + id + "&s=" + String(size) + "&bg=" + (dark ? "dark" : "light");
+  if (size > 0 && size <= 64 && http.begin(client, u)) {
+    if (http.GET() == 200 && http.getSize() == (int)want) {
+      px = (uint8_t*)ps_malloc(want);
+      WiFiClient* st = http.getStreamPtr();
+      size_t got = 0;
+      uint32_t t0 = millis();
+      while (px && got < want && millis() - t0 < 4000) {
+        int n = st->readBytes(px + got, want - got);
+        if (n > 0) got += n; else delay(5);
+      }
+      if (got != want) { free(px); px = nullptr; }
+    }
+    http.end();
+  }
+  xSemaphoreTake(gIconMux, portMAX_DELAY);
+  gIconWant.erase(gIconWant.begin());
+  if (px) gIcons.push_back({key, px});
+  else {
+    for (auto it = gIconFail.begin(); it != gIconFail.end();) it = it->first == key ? gIconFail.erase(it) : it + 1;
+    gIconFail.push_back({key, millis()});
+  }
+  xSemaphoreGive(gIconMux);
+  return px != nullptr;
+}
 
 void netBegin() {
   gMux = xSemaphoreCreateMutex();
