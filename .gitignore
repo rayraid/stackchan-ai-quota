@@ -14,3 +14,6 @@ firmware/shots/
 
 # 设计过程中的原型页（含个人环境信息），暂不公开
 prototype/
+mac/.build/
+mac/build/
+firmware/fonts/src/

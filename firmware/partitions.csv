@@ -1,0 +1,9 @@
+# 两份约 7.6MB 的应用区（WiFi 升级时轮流用），放得下中日英三套平滑字体。
+# nvs 和 otadata 的位置和官方默认一样，换分区表不会丢 WiFi 和配置。
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x5000,
+otadata,  data, ota,     0xe000,   0x2000,
+app0,     app,  ota_0,   0x10000,  0x7A0000,
+app1,     app,  ota_1,   0x7B0000, 0x7A0000,
+spiffs,   data, spiffs,  0xF50000, 0xA0000,
+coredump, data, coredump,0xFF0000, 0x10000,
