@@ -75,6 +75,7 @@ bool parseState(const String& body, State& s);
 bool parseCfg(JsonVariantConst o, Cfg& c);
 // 图标：向小管家要，存在内存里。还没拿到时返回 nullptr（同时排队去取）。每个像素 B、G、R、A
 const uint8_t* iconGet(const String& id, const String& ver, int size, bool darkBg);
+extern bool gNoIcons;   // 串口 icons off：不画官方图标，只画字母方块（截公开截图用）
 
 // ---------- ui.cpp：画面 ----------
 struct UiCtx {

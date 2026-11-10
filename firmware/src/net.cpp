@@ -215,8 +215,9 @@ static std::vector<String> gIconWant;              // 要去取的
 static std::vector<std::pair<String, uint32_t>> gIconFail;   // 取失败的，1 分钟后再试
 static SemaphoreHandle_t gIconMux = xSemaphoreCreateMutex();
 
+bool gNoIcons = false;
 const uint8_t* iconGet(const String& id, const String& ver, int size, bool darkBg) {
-  if (!id.length() || !ver.length()) return nullptr;
+  if (gNoIcons || !id.length() || !ver.length()) return nullptr;
   String key = id + "|" + ver + "|" + String(size) + "|" + (darkBg ? "d" : "l");
   const uint8_t* found = nullptr;
   xSemaphoreTake(gIconMux, portMAX_DELAY);

@@ -185,11 +185,11 @@ static void applyBrightness(const Cfg& c, Mode m) {
 
 // ---------- 串口命令 ----------
 static const char DEMO_JSON[] PROGMEM = R"JSON({"ok":true,"time":"16:27","data_time":"16:27","now":1000,"face":["claude","codex","antigravity"],"subs":[
-{"id":"codex","icon":"demo","name":"Codex","mono":"CX","hue":"#7c9cff","left":98,"label":"本月","level":"ok","reset":"12月1日重置","windows":[{"label":"5小时","left":100,"level":"ok","reset":"","pace":""},{"label":"本月","left":98,"level":"ok","reset":"12月1日重置","pace":""}]},
-{"id":"claude","icon":"demo","name":"Claude","mono":"CL","hue":"#e08a63","left":74,"label":"5小时","level":"ok","reset":"17:30 恢复","windows":[{"label":"5小时","left":74,"level":"ok","reset":"17:30 恢复","pace":""},{"label":"本周","left":93,"level":"ok","reset":"周四重置","pace":""},{"label":"Fable 本周","left":95,"level":"ok","reset":"周四重置","pace":""}]},
-{"id":"cursor","icon":"demo","name":"Cursor","mono":"CU","hue":"#cfd4dc","left":98,"label":"本周","level":"ok","reset":"周日重置","windows":[{"label":"本周","left":98,"level":"ok","reset":"周日重置","pace":""}]},
-{"id":"opencodego","icon":"demo","name":"OpenCode Go","mono":"OC","hue":"#5fd3bc","left":71,"label":"本月","level":"ok","reset":"12月7日重置","windows":[{"label":"5小时","left":100,"level":"ok","reset":"17:54 恢复","pace":""},{"label":"本周","left":85,"level":"ok","reset":"周一重置","pace":""},{"label":"本月","left":71,"level":"ok","reset":"12月7日重置","pace":"照现在的速度 7 天后用完"}]},
-{"id":"antigravity","icon":"demo","name":"Antigravity","mono":"AG","hue":"#b28cff","left":63,"label":"Gemini 本周","level":"ok","reset":"周六重置","windows":[{"label":"Gemini 5小时","left":83,"level":"ok","reset":"16:20 恢复","pace":""},{"label":"Gemini 本周","left":63,"level":"ok","reset":"周六重置","pace":""},{"label":"Claude/GPT 5小时","left":100,"level":"ok","reset":"20:18 恢复","pace":""},{"label":"Claude/GPT 本周","left":73,"level":"ok","reset":"周日重置","pace":""}]}
+{"id":"codex","icon":"demo","name":"Codex","mono":"CX","hue":"#7c9cff","left":98,"label":"本月","level":"ok","reset":"12月1日重置","windows":[{"label":"5小时","left":100,"level":"ok","reset":"","pace":"","mins":300},{"label":"本月","left":98,"level":"ok","reset":"12月1日重置","pace":"","mins":43200}]},
+{"id":"claude","icon":"demo","name":"Claude","mono":"CL","hue":"#e08a63","left":74,"label":"5小时","level":"ok","reset":"17:30 恢复","windows":[{"label":"5小时","left":74,"level":"ok","reset":"17:30 恢复","pace":"","mins":300},{"label":"本周","left":93,"level":"ok","reset":"周四重置","pace":"","mins":10080},{"label":"Fable 本周","left":95,"level":"ok","reset":"周四重置","pace":"","mins":10080}]},
+{"id":"cursor","icon":"demo","name":"Cursor","mono":"CU","hue":"#cfd4dc","left":98,"label":"本周","level":"ok","reset":"周日重置","windows":[{"label":"本周","left":98,"level":"ok","reset":"周日重置","pace":"","mins":10080}]},
+{"id":"opencodego","icon":"demo","name":"OpenCode Go","mono":"OC","hue":"#5fd3bc","left":71,"label":"本月","level":"ok","reset":"12月7日重置","windows":[{"label":"5小时","left":100,"level":"ok","reset":"17:54 恢复","pace":"","mins":300},{"label":"本周","left":85,"level":"ok","reset":"周一重置","pace":"","mins":10080},{"label":"本月","left":71,"level":"ok","reset":"12月7日重置","pace":"照现在的速度 7 天后用完","mins":43200}]},
+{"id":"antigravity","icon":"demo","name":"Antigravity","mono":"AG","hue":"#b28cff","left":63,"label":"Gemini 本周","level":"ok","reset":"周六重置","windows":[{"label":"Gemini 5小时","left":83,"level":"ok","reset":"16:20 恢复","pace":"","mins":300},{"label":"Gemini 本周","left":63,"level":"ok","reset":"周六重置","pace":"","mins":10080},{"label":"Claude/GPT 5小时","left":100,"level":"ok","reset":"20:18 恢复","pace":"","mins":300},{"label":"Claude/GPT 本周","left":73,"level":"ok","reset":"周日重置","pace":"","mins":10080}]}
 ],"lows":[],"waiting":[]})JSON";
 
 static void demo(const String& kind) {
@@ -201,6 +201,7 @@ static void demo(const String& kind) {
     Wait w; w.id = String("d-") + k; w.agent = agent; w.project = proj; w.kind = k; w.text = t; w.since = 958;
     String ag = agent;
     w.iconId = ag == "Claude Code" ? "claude" : ag == "Codex" ? "codex" : ag == "Cursor" ? "cursor" : "";
+    w.mono = ag == "Claude Code" ? "CL" : ag == "Codex" ? "CX" : ag == "Cursor" ? "CU" : "";
     w.iconV = w.iconId.length() ? "demo" : "";
     s.waiting.push_back(w);
   };
@@ -288,6 +289,7 @@ static void handleSerial() {
       gSimX = cmd.substring(sp + 1, sp2).toInt(); gSimY = cmd.substring(sp2 + 1).toInt();
       gSimTap = cmd.startsWith("tap") ? 1 : 2; Serial.println("OK");
     }
+    else if (cmd == "icons off" || cmd == "icons on") { gNoIcons = cmd == "icons off"; Serial.println("OK"); }   // 截公开截图时只画字母方块
     else if (cmd == "info") Serial.printf("INFO fw=%s %s demo=%d heap=%u psram=%u rev=%d\n", FW_VERSION, netInfo().c_str(), (int)gDemo, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getFreePsram(), c.rev);
     else if (cmd == "body") {
       auto in = M5StackChan.TouchSensor.getIntensities();

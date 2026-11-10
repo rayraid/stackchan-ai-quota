@@ -209,8 +209,12 @@ static bool icon(const String& id, const String& ver, int size, int x, int y, bo
 }
 static void letterTile(const Sub& b, int x, int y, int size) {
   rrect(x, y, size, size, size * 0.3f, b.hue);
-  txt(b.mono, x + size / 2, y + size / 2 + 1, size >= 36 ? N22B : N15B, 0x0b0e13, textdatum_t::middle_center);
+  const lgfx::IFont* f = size >= 36 ? N22B : N15B;
+  if (tw(b.mono, f) > size - 3) f = F14;          // 小方块里两个粗体字母放不下，换细一点的
+  txt(b.mono, x + size / 2, y + size / 2 + 1, f, 0x0b0e13, textdatum_t::middle_center);
 }
+// 等你的那家 AI 没有图标时写的两个字母
+static String monoOf(const Wait* w) { String m = w->mono.length() ? w->mono : w->agent.substring(0, 2); m.toUpperCase(); return m; }
 static void badge(const Sub& b, int x, int y, int size, bool darkBg) {
   if (!icon(b.id, b.icon, size, x, y, darkBg)) letterTile(b, x, y, size);
 }
@@ -284,7 +288,7 @@ static void waitMark(const State& s, const Theme& T, int x, int y) {
   cv.fillSmoothCircle(x, y, 21, c565(0xffb020));
   cv.fillSmoothCircle(x, y, 18, c565(T.panel));
   if (!icon(w->iconId, w->iconV, 24, x - 12, y - 12, !T.light))
-    txt(w->mono.length() ? w->mono : w->agent.substring(0, 2), x, y + 1, N15B, T.fg, textdatum_t::middle_center);
+    txt(monoOf(w), x, y + 1, N15B, T.fg, textdatum_t::middle_center);
 }
 // 首页上的红色小胶囊「只剩 8%」（B、D 用：没常驻显示的那一家快用完时才出现）
 struct Rect { int x, y, w, h; String id; bool hit(int px, int py) const { return w > 0 && px >= x && px < x + w && py >= y && py < y + h; } };
@@ -451,6 +455,7 @@ static void pageLow(const State& s, const Cfg& c, const Theme& T, uint32_t t, co
   txt(fit(l.name + " · " + (l.reset.length() ? l.reset : l.label), 230, F16), 72, 46, F16, mix(cb, cf, .8f));
 }
 // 有 AI 在等你：整屏变色
+static void askLogo(const Wait* w, int cx, int cy, int r, int size, uint32_t fg, uint32_t bg);
 static void askClassic(const Wait* w, const Cfg& c, const UiCtx& u, uint32_t t) {
   const String& k = w->kind;
   bool green = k == "done" || k == "restored";
@@ -460,16 +465,10 @@ static void askClassic(const Wait* w, const Cfg& c, const UiCtx& u, uint32_t t) 
   Expr e = green ? E_HAPPY : k == "error" ? E_WORRY : E_ALERT;
   eyes(e, 160, 72, 100, fg, 0, bgc, c, t, false);
   // 右上角：举着对方的 logo（像来电显示），小圆点里是 ! ? ✓
-  cv.fillSmoothCircle(270, 40, 27, c565(fg));
-  if (icon(w->iconId, w->iconV, 28, 256, 26, true)) {
-    cv.fillSmoothCircle(290, 62, 11, c565(0xffffff));
-    if (green) { wline(284, 62, 288, 66, 1.8f, fg); wline(288, 66, 296, 57, 1.8f, fg); }
-    else txt(k == "question" ? "?" : "!", 290, 63, N15B, fg, textdatum_t::middle_center);
-  } else {
-    cv.fillSmoothCircle(270, 40, 27, c565(bgc));      // 没有图标：照旧只画 ! 或 ?
-    if (k == "approval") txt("!", 268, 22, F38B, fg, textdatum_t::top_center);
-    if (k == "question") txt("?", 268, 22, F38B, fg, textdatum_t::top_center);
-  }
+  askLogo(w, 270, 40, 27, 28, fg, bgc);                 // 没有图标时圆里写字母
+  cv.fillSmoothCircle(290, 62, 11, c565(0xffffff));
+  if (green) { wline(284, 62, 288, 66, 1.8f, fg); wline(288, 66, 296, 57, 1.8f, fg); }
+  else txt(k == "question" ? "?" : "!", 290, 63, N15B, fg, textdatum_t::middle_center);
   String title = tr(k == "approval" ? S_APPROVAL : k == "question" ? S_QUESTION : k == "done" ? S_DONE : k == "error" ? S_ERROR : k == "restored" ? S_RESTORED : S_NOTE);
   txt(fit(title, 308, F38B), 160, 118, F38B, fg, textdatum_t::top_center);
   String sub = w->agent + " · " + (k == "note" ? w->text : w->project);
@@ -503,7 +502,7 @@ static void askMark(const String& k, int x, int y, int r, uint32_t fg) {
 static void askLogo(const Wait* w, int cx, int cy, int r, int size, uint32_t fg, uint32_t bg) {
   cv.fillSmoothCircle(cx, cy, r, c565(fg));
   if (!icon(w->iconId, w->iconV, size, cx - size / 2, cy - size / 2, true))
-    txt(w->mono.length() ? w->mono : w->agent.substring(0, 2), cx, cy + 1, N15B, bg, textdatum_t::middle_center);
+    txt(monoOf(w), cx, cy + 1, N15B, bg, textdatum_t::middle_center);
 }
 static void askB(const Wait* w, const Cfg& c, const UiCtx& u, uint32_t t) {
   const String& k = w->kind;

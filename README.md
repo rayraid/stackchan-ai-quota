@@ -3,14 +3,14 @@
 把一台 [M5Stack StackChan](https://docs.m5stack.com/en/StackChan) 变成桌面小摆件：
 
 - **平时**显示你各家 AI 订阅还剩多少额度（Claude、Codex、Cursor、OpenCode、Antigravity 等，CodexBar 支持的都行）。
-- **任何一个 AI 编程助手在等你回复时**，它整屏变色、点一下头、亮灯、响一声，几秒后回到平时的样子，灯和右上角的小 logo 一直留到你回到那个 AI。**不需要碰它**：机器人只负责让你看到，不要求你回应。
+- **任何一个 AI 编程助手在等你回复时**，它整屏变色、点一下头、亮灯、响一声，10 秒后回到平时的样子；要你批准、有问题、出错时，灯和右上角的小 logo 一直留到你回到那个 AI，「做完了」提醒完就熄。**不需要碰它**：机器人只负责让你看到，不要求你回应。
 - Mac 上有一个菜单栏应用「小管家」：装好就能用，带安装向导和很多设置。界面和机器人屏幕支持**中文、日文、英文**。
 
 > A desk gadget built on M5Stack StackChan (CoreS3). It shows the remaining quota of your AI subscriptions and nods, lights up and chimes when any AI coding agent is waiting for you. Comes with a macOS menu bar app (setup assistant, lots of settings). UI in Chinese, Japanese and English; docs are in Chinese.
 
 ![机器人屏幕](docs/screens.png)
 
-上图是固件把自己的画面通过 USB 传回来的截图（演示数据）：平时、要你批准、有问题问你、做完了、额度快用完、已知道但还在等、全部额度、单个订阅、连不上 Mac。
+上图是固件把自己的画面通过 USB 传回来的截图（演示数据，各家 logo 换成了字母）：首页 A（左上角是电量）、首页 B（眼睛就是额度）、要你批准、做完了、提醒过后还在等（右上角是谁在等）、额度快用完、全部额度、单个订阅的明细、提醒画面样式 C。
 
 ![三种语言](docs/languages.png)
 
@@ -120,7 +120,7 @@ cd firmware
 ../.venv/bin/python tools/devtool.py sheet out.png "demo calm" 'set {"alert_secs":0};demo approval' 'set {"home":"C"};demo low'
 ```
 
-串口命令：`info`、`hello`、`cfg wifi|link|save|show|clear`、`set {设置 JSON}`、`shot`、`demo calm|approval|question|done|error|waiting|low|stale|off|rest|setup|nolink|connecting|exit`、`page face|list|detail <id>`、`nod`、`shake`、`chime`、`find`、`reboot`。
+串口命令：`info`、`hello`、`cfg wifi|link|save|show|clear`、`set {设置 JSON}`、`shot`、`body`（电池电压电流）、`batt 76|batt 64 chg|batt real`（假装电量，截图用）、`icons off|on`（只画字母方块，截公开截图用）、`tap x y`、`hold x y`、`pat`、`demo calm|approval|question|done|error|waiting|low|stale|off|rest|setup|nolink|connecting|exit`、`page face|list|detail <id>`、`nod`、`shake`、`chime`、`find`、`reboot`。
 
 ### Mac 应用（`mac/`）
 
