@@ -306,6 +306,11 @@ final class Engine: @unchecked Sendable {
         let la = peonLastActive()
         let ts = (la["timestamp"] as? NSNumber)?.doubleValue ?? 0
         let sid = abs(Date().timeIntervalSince1970 - ts) < 6 ? (la["session_id"] as? String ?? "") : ""
+        // Codex 主任务派出去的子任务（plan、review……）做完时也报「做完了」，其实主任务还在跑，没在等你
+        if agent == "Codex", ["done", "error", "note"].contains(kind), sid.hasPrefix("codex-"), CodexThreads.isSubagent(String(sid.dropFirst(6))) {
+            log("Codex 子任务做完了（主任务还在跑），不提醒：", project)
+            return nil
+        }
         return addWaiting(agent: agent.isEmpty ? "AI" : agent, project: project.isEmpty ? "?" : project, kind: kind, detail: detail, sessionId: sid)
     }
 

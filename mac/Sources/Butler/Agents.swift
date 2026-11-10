@@ -107,3 +107,37 @@ struct AgentHowTo: View {
         .frame(width: 480)
     }
 }
+
+/// Codex 的会话是不是子任务：看 Codex 自己记的会话文件（~/.codex/sessions/年/月/日/rollout-…-<会话 id>.jsonl）
+/// 第一行的 source 里有没有 subagent。只读；找不到文件或格式变了，就当不是子任务（照常提醒）。
+enum CodexThreads {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var known: [String: Bool] = [:]
+
+    static func isSubagent(_ threadId: String) -> Bool {
+        guard !threadId.isEmpty else { return false }
+        if let v = lock.withLock({ known[threadId] }) { return v }
+        let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions")
+        let cal = Calendar.current
+        var found: URL?
+        for back in 0..<3 {                     // 子任务都是最近派出去的：看今天和前两天
+            guard let d = cal.date(byAdding: .day, value: -back, to: Date()) else { continue }
+            let c = cal.dateComponents([.year, .month, .day], from: d)
+            let dir = root.appendingPathComponent(String(format: "%04d/%02d/%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0))
+            if let f = (try? FileManager.default.contentsOfDirectory(atPath: dir.path))?.first(where: { $0.hasSuffix(threadId + ".jsonl") }) {
+                found = dir.appendingPathComponent(f); break
+            }
+        }
+        guard let u = found, let h = try? FileHandle(forReadingFrom: u) else { return false }
+        defer { try? h.close() }
+        let head = (try? h.read(upToCount: 1 << 20)) ?? Data()
+        let first = head.split(separator: UInt8(ascii: "\n"), maxSplits: 1, omittingEmptySubsequences: true).first.map { Data($0) } ?? Data()
+        var sub = false
+        if let o = (try? JSONSerialization.jsonObject(with: first)) as? [String: Any],
+           let p = o["payload"] as? [String: Any], let src = p["source"] as? [String: Any] {
+            sub = src["subagent"] != nil
+        }
+        lock.withLock { known[threadId] = sub }
+        return sub
+    }
+}
