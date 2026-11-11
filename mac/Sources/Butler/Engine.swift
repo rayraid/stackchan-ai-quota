@@ -429,7 +429,14 @@ final class Engine: @unchecked Sendable {
         // 这条推送来自哪个会话：peon-ping 刚刚把它写进了自己的状态文件
         let la = peonLastActive()
         let ts = (la["timestamp"] as? NSNumber)?.doubleValue ?? 0
-        let sid = abs(Date().timeIntervalSince1970 - ts) < 6 ? (la["session_id"] as? String ?? "") : ""
+        let fresh = abs(Date().timeIntervalSince1970 - ts) < 6
+        let sid = fresh ? (la["session_id"] as? String ?? "") : ""
+        // 子任务做完（SubagentStop）peon-ping 也报「做完了」：Claude Code 回完一条后还会在后台跑个小任务，
+        // 两三秒后结束又报一次，机器人就闪两遍。主任务真做完时有自己的 Stop，这条不用提醒
+        if fresh, la["event"] as? String == "SubagentStop" {
+            log("子任务做完了，不提醒：", agent.isEmpty ? "AI" : agent, "·", project)
+            return nil
+        }
         // Codex 主任务派出去的子任务（plan、review……）做完时也报「做完了」，其实主任务还在跑，没在等你
         if agent == "Codex", ["done", "error", "note"].contains(kind), sid.hasPrefix("codex-"), CodexThreads.isSubagent(String(sid.dropFirst(6))) {
             log("Codex 子任务做完了（主任务还在跑），不提醒：", project)
