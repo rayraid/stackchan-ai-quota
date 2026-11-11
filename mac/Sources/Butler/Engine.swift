@@ -83,6 +83,7 @@ final class Engine: @unchecked Sendable {
     private var usageSig = ""
     private var waiting: [WaitItem] = []
     private var hookSeen: Set<String> = []
+    private var lastDone: [String: Double] = [:]    // 每个对话最近一次报「做完了」的时间（挑出重复的那条）
     private var lastBattLogged = -100
     private var lastBattPower = false
     private var seq = 0
@@ -382,23 +383,51 @@ final class Engine: @unchecked Sendable {
         case "StopFailure":
             return addWaiting(agent: agent, project: project, kind: "error", detail: "", sessionId: sid)
         case "Stop":
+            if fromSubagent { return nil }                  // 子任务自己停下（正常走 SubagentStop，没登记；保险起见）
             if tool == "codex", CodexThreads.isSubagent(rawSid) {
                 log("Codex 子任务做完了（主任务还在跑），不提醒：", project); return nil
             }
-            // Antigravity：你自己停的、后台还在跑的不算；Cursor：你中途停掉的不算
+            // Claude Code 把活派给后台子任务后会先「停」一下等回报，回报一到又接着干：这时不是在等你
+            if tool == "claude", let b = ClaudeSessions.busy(str("transcript_path").isEmpty ? (ClaudeSessions.transcript(session: rawSid) ?? "") : str("transcript_path")) {
+                log("Claude Code 主任务还在等后台子任务，不提醒：", project, b); return nil
+            }
+            // Antigravity 每次都带 error 字段，正常停下时是空字符串，只有 terminationReason 是 ERROR 才是出错；
+            // Cursor 用 status：completed / aborted / error
             let reason = str("terminationReason", "status")
-            if reason == "USER_CANCELED" || reason == "aborted" || (d["fullyIdle"] as? Bool) == false { return nil }
-            let failed = reason == "ERROR" || reason == "error" || d["error"] != nil
+            let errText: String = {
+                guard let e = d["error"], !(e is NSNull) else { return "" }
+                return ((e as? String) ?? "\(e)").trimmingCharacters(in: .whitespacesAndNewlines)
+            }()
+            if tool == "antigravity" {
+                log("Antigravity 停下：", reason.isEmpty ? "?" : reason, "fullyIdle=\(d["fullyIdle"].map { "\($0)" } ?? "?")", errText.isEmpty ? "" : "error=" + errText.prefix(80))
+            }
+            if reason == "USER_CANCELED" || reason == "aborted" { return nil }     // 你自己停的：你就在跟前
+            if (d["fullyIdle"] as? Bool) == false { return nil }                  // Antigravity：后台还有活在跑
+            let failed = reason == "ERROR" || reason == "error" || (reason.isEmpty && !errText.isEmpty)
+            if !failed, repeatDone(sid.isEmpty ? agent + "|" + project : sid) { return nil }
             return addWaiting(agent: agent, project: project, kind: failed ? "error" : "done", detail: "", sessionId: sid)
         default:
             return nil
         }
     }
 
+    /// 同一个对话几秒前刚报过「做完了」、中间你没回去过：这条是重复的（peon-ping 那条路偶尔把子任务的结束也报成做完了）
+    private func repeatDone(_ key: String) -> Bool {
+        let now = Date().timeIntervalSince1970
+        let dup: Bool = lock.withLock {
+            if let t = lastDone[key], now - t < 8 { return true }
+            lastDone[key] = now
+            return false
+        }
+        if dup { log("重复的「做完了」，不再提醒：", key) }
+        return dup
+    }
+
     /// 这个对话的提醒全部熄掉
     func clear(session sid: String, why: String) {
         var changed = false
         lock.withLock {
+            lastDone[sid] = nil
             waiting.removeAll { w in
                 guard w.sessionId == sid else { return false }
                 log("等你回复 -", w.agent, "·", w.project, "（\(why)）"); changed = true; return true
@@ -426,23 +455,46 @@ final class Engine: @unchecked Sendable {
         else if low.hasPrefix("compacting") || low.hasPrefix("working") || low.hasPrefix("ready") { return nil }
         else if low.hasPrefix("error") { kind = "error" }
         else { detail = String(msg.prefix(40)) }
-        // 这条推送来自哪个会话：peon-ping 刚刚把它写进了自己的状态文件
+        // 这条推送来自哪个会话：peon-ping 刚刚把它写进了自己的状态文件。可那个文件只有一格，
+        // 几个对话同时在跑时，推送发出来之前可能已经被别的对话改写了：时间新、工作目录也对得上才信
         let la = peonLastActive()
         let ts = (la["timestamp"] as? NSNumber)?.doubleValue ?? 0
-        let fresh = abs(Date().timeIntervalSince1970 - ts) < 6
-        let sid = fresh ? (la["session_id"] as? String ?? "") : ""
+        let laCwd = la["cwd"] as? String ?? ""
+        let trusted = abs(Date().timeIntervalSince1970 - ts) < 6
+            && (project.isEmpty || laCwd.isEmpty || Workspace.names(laCwd).contains(project))
+        var sid = trusted ? (la["session_id"] as? String ?? "") : ""
         // 子任务做完（SubagentStop）peon-ping 也报「做完了」：Claude Code 回完一条后还会在后台跑个小任务，
         // 两三秒后结束又报一次，机器人就闪两遍。主任务真做完时有自己的 Stop，这条不用提醒
-        if fresh, la["event"] as? String == "SubagentStop" {
+        if trusted, la["event"] as? String == "SubagentStop" {
             log("子任务做完了，不提醒：", agent.isEmpty ? "AI" : agent, "·", project)
             return nil
         }
-        // Codex 主任务派出去的子任务（plan、review……）做完时也报「做完了」，其实主任务还在跑，没在等你
-        if agent == "Codex", ["done", "error", "note"].contains(kind), sid.hasPrefix("codex-"), CodexThreads.isSubagent(String(sid.dropFirst(6))) {
-            log("Codex 子任务做完了（主任务还在跑），不提醒：", project)
-            return nil
+        // Codex 主任务派出去的子任务（plan、review……）做完时也报「做完了」，其实主任务还在跑，没在等你。
+        // 状态文件不可信时，直接看 Codex 自己的记录：刚做完一轮的是不是子任务
+        if agent == "Codex", ["done", "error", "note"].contains(kind) {
+            if !sid.hasPrefix("codex-") { sid = "" }        // 同一个项目里别的工具（比如 Claude Code）的对话
+            let latest = sid.isEmpty ? CodexThreads.latestFinished() : nil
+            if sid.isEmpty ? latest?.sub == true : CodexThreads.isSubagent(String(sid.dropFirst(6))) {
+                log("Codex 子任务做完了（主任务还在跑），不提醒：", project)
+                return nil
+            }
+            if let l = latest { sid = "codex-" + l.id }
         }
-        return addWaiting(agent: agent.isEmpty ? "AI" : agent, project: project.isEmpty ? "?" : project, kind: kind, detail: detail, sessionId: sid)
+        // Claude Code 主任务把活派给后台子任务后会先「停」一下等回报（回报一到又接着干），子任务做完时也会报一次：都不是在等你
+        if agent == "Claude Code", ["done", "note"].contains(kind) {
+            // 状态文件里的会话找不到 Claude Code 的记录（是别的工具的，或者不可信），就按项目名找最近在写的那个
+            let found = ClaudeSessions.transcript(session: sid).map { (path: $0, session: sid) } ?? ClaudeSessions.recentTranscript(project: project)
+            if let f = found {
+                if let b = ClaudeSessions.busy(f.path) {
+                    log("Claude Code 主任务还在等后台子任务，不提醒：", project, b)
+                    return nil
+                }
+                sid = f.session
+            }
+        }
+        let shownAgent = agent.isEmpty ? "AI" : agent, shownProject = project.isEmpty ? "?" : project
+        if kind == "done", repeatDone(sid.isEmpty ? shownAgent + "|" + shownProject : sid) { return nil }
+        return addWaiting(agent: shownAgent, project: shownProject, kind: kind, detail: detail, sessionId: sid)
     }
 
     /// 清掉已经回复的、挂太久的（每秒一次）
@@ -458,6 +510,7 @@ final class Engine: @unchecked Sendable {
         }
         var changed = false
         lock.withLock {
+            if let la, CLEAR_EVENTS.contains(la["event"] as? String ?? ""), let s = la["session_id"] as? String { lastDone[s] = nil }
             let before = waiting.count
             waiting.removeAll { w in
                 if w.ttl > 0 && now - w.since > w.ttl { return true }
