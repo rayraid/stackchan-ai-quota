@@ -236,6 +236,28 @@ static Val valOf(const State& s, const Cfg& c, const Theme& T, const Lv& L, cons
   uint32_t col = na ? L.na : lvc(L, b.level);
   return {v, col, na ? T.dim : (b.level == "ok" ? T.fg : col), na};
 }
+// 只有一家订阅时：首页拆成它的几个时间段（小管家算好下标放在 split 里）
+static const Sub* splitSub(const State& s, std::vector<const Win*>& ws) {
+  ws.clear();
+  if (s.subs.size() != 1 || s.splitId != s.subs[0].id) return nullptr;
+  const Sub& b = s.subs[0];
+  for (int i : s.splitW) if (i >= 0 && i < (int)b.wins.size()) ws.push_back(&b.wins[i]);
+  return ws.size() >= 2 ? &b : nullptr;
+}
+static Val winVal(const State& s, const Cfg& c, const Theme& T, const Lv& L, const Sub& b, const Win& w, bool grey) {
+  bool na = grey || w.left < 0 || b.stale || !s.ok;
+  int v = w.left < 0 ? -1 : (c.used ? 100 - w.left : w.left);
+  uint32_t col = na ? L.na : lvc(L, w.level);
+  return {v, col, na ? T.dim : (w.level == "ok" ? T.fg : col), na};
+}
+static void numPct(const Val& q, int x, int cy, const lgfx::IFont* nf, const Theme& T, textdatum_t d);
+// 一家的 logo + 名字，居中一行
+static void nameRow(const Sub& b, int cy, const Theme& T) {
+  String nm = fit(b.name, 200, F14);
+  int w = 18 + 6 + tw(nm, F14), x = 160 - w / 2;
+  badge(b, x, cy - 9, 18, !T.light);
+  txt(nm, x + 24, cy + 1, F14, T.dim, textdatum_t::middle_left);
+}
 static void numPct(const Val& q, int x, int cy, const lgfx::IFont* nf, const Theme& T, textdatum_t d) {
   String num = q.val < 0 ? String("--") : String(q.val);
   int nw = tw(num, nf), pw = q.val < 0 ? 0 : tw("%", F14) + 2;
@@ -310,8 +332,26 @@ static void lowChip(const State& s, const Low& l, const Theme& T, const Lv& L, i
 
 // ---------- A 轻底栏：去掉方块，数字像一行小字托在脸下面 ----------
 static int aCenter(int i, int n) { return 160 + (int)lroundf((i - (n - 1) / 2.0f) * 104); }
+static int aSplitCenter(int i, int n) { return 160 + (int)lroundf((i - (n - 1) / 2.0f) * 112); }
 static void homeA(const State& s, const Cfg& c, const Theme& T, const Lv& L, uint32_t t, bool grey, Expr e) {
   bgFill(T);
+  std::vector<const Win*> ws;
+  if (const Sub* one = splitSub(s, ws)) {          // 只有一家：底栏放它的几个时间段，名字在中间出现一次
+    eyes(e, 160, 84, 118, eyeColor(c, T), T.light ? 0 : T.glow, bgAt(T, 84), c, t, true, c.sleepy ? .45f : 1, 1.1f);
+    if (c.sleepy && e == E_CALM) zz(236, 44, t, T.dim, bgAt(T, 44));
+    nameRow(*one, 152, T);
+    int n = std::min(3, (int)ws.size()), hw = n == 2 ? 54 : 44;
+    for (int i = 0; i < n; i++) {
+      int cx = aSplitCenter(i, n);
+      Val q = winVal(s, c, T, L, *one, *ws[i], grey);
+      txt(fit(ws[i]->label, hw + 6, F14), cx - hw, 198, F14, T.dim, textdatum_t::middle_left);
+      numPct(q, cx + hw, 197, N22B, T, textdatum_t::middle_right);
+      rrect(cx - hw, 218, 2 * hw, 3, 1.5f, T.track);
+      if (q.val > 0) rrect(cx - hw, 218, std::max(3, 2 * hw * q.val / 100), 3, 1.5f, q.col);
+      if (i < n - 1) cv.fillRect(cx + 56, 188, 1, 26, c565(mix(bgAt(T, 200), T.dim, .25f)));
+    }
+    return;
+  }
   eyes(e, 160, 90, 118, eyeColor(c, T), T.light ? 0 : T.glow, bgAt(T, 90), c, t, true, c.sleepy ? .45f : 1, 1.18f);
   if (c.sleepy && e == E_CALM) zz(236, 50, t, T.dim, bgAt(T, 50));
   auto v = faceSubs(s, 3);
@@ -356,6 +396,38 @@ static void homeB(const State& s, const Cfg& c, const Theme& T, const Lv& L, uin
   float dx = (e == E_CALM && c.look) ? lookDx(t, 7) : 0;
   bool blink = e == E_CALM && c.blink && (t % 4300) > 4140;
   if (e == E_HAPPY) eyes(E_HAPPY, 160, 88, 104, ec, 0, 0, c, t, false, 1, 1.4f);
+  std::vector<const Win*> ws;
+  const Sub* one = splitSub(s, ws);
+  if (one || (v.size() == 1 && s.subs.size() == 1)) {   // 只有一家：两只眼睛是它的两个时间段；只有一个时间段时两只眼睛一样
+    const Sub& b = one ? *one : *v[0];
+    for (int i = 0; i < 2; i++) {
+      Val q = one ? winVal(s, c, T, L, b, *ws[i], grey) : valOf(s, c, T, L, b, grey);
+      int left = one ? std::max(0, ws[i]->left) : std::max(0, b.left);
+      String lv = one ? ws[i]->level : b.level;
+      uint32_t fill = q.na ? L.na : (lv == "low" ? L.low : ec);
+      if (e != E_HAPPY) {
+        if (blink) rrect(B_X[i] + dx - g.w / 2, B_CY - 6 - 3.5f, g.w, 7, 3.5f, fill);
+        else tank(B_X[i] + dx, B_CY - 6, g, left, fill, ec, T, !T.light && !q.na);
+      }
+      if (!one) continue;
+      String lab = fit(ws[i]->label, 60, F14), num = q.val < 0 ? String("--") : String(q.val);
+      int total = tw(lab, F14) + 6 + tw(num, N22B) + 2 + tw("%", F14), x0 = B_X[i] - total / 2;
+      txt(lab, x0, 171, F14, T.dim, textdatum_t::middle_left);
+      numPct(q, x0 + tw(lab, F14) + 6, 170, N22B, T, textdatum_t::middle_left);
+    }
+    if (one) nameRow(b, 212, T);
+    else {
+      Val q = valOf(s, c, T, L, b, grey);
+      String num = q.val < 0 ? String("--") : String(q.val);
+      int total = 20 + 6 + tw(num, N22B) + 2 + tw("%", F14), x0 = 160 - total / 2;
+      badge(b, x0, 166, 20, !T.light);
+      numPct(q, x0 + 26, 176, N22B, T, textdatum_t::middle_left);
+      if (b.reset.length()) txt(fit(b.label + " · " + b.reset, 280, F14), 160, 207, F14, T.dim, textdatum_t::middle_center);
+    }
+    if (c.sleepy && e == E_CALM) zz(246, 26, t, T.dim, bgAt(T, 26));
+    gChip = {};
+    return;
+  }
   for (int i = 0; i < 2; i++) {
     const Sub* b = i < (int)v.size() ? v[i] : nullptr;
     Val q = b ? valOf(s, c, T, L, *b, grey) : Val{-1, ec, T.dim, true};
@@ -384,6 +456,22 @@ static void homeC(const State& s, const Cfg& c, const Theme& T, const Lv& L, uin
   eyes(e, 74, 128, 58, eyeColor(c, T), T.light ? 0 : T.glow, bgAt(T, 128), c, t, true, c.sleepy ? .45f : 1, .72f);
   rrect(C_BX, C_BY, C_BW, C_BH, 18, T.panel);
   cv.fillTriangle(C_BX + 1, 112, 124, 128, C_BX + 1, 144, c565(T.panel));
+  std::vector<const Win*> ws;
+  if (const Sub* one = splitSub(s, ws)) {          // 只有一家：气泡顶上写它的名字，下面每个时间段一行
+    badge(*one, 154, 26, 22, !T.light);
+    txt(fit(one->name, 120, F16), 184, 38, F16, T.fg, textdatum_t::middle_left);
+    int n = std::min(3, (int)ws.size()), h = std::min(70, 164 / n), top0 = 58 + (164 - n * h) / 2;
+    for (int i = 0; i < n; i++) {
+      int top = top0 + i * h;
+      Val q = winVal(s, c, T, L, *one, *ws[i], grey);
+      txt(fit(ws[i]->label, 80, F16), 154, top + h / 2 - 12, F16, T.fg, textdatum_t::middle_left);
+      numPct(q, 298, top + h / 2 - 12, N28B, T, textdatum_t::middle_right);
+      rrect(154, top + h / 2 + 10, 144, 4, 2, T.track);
+      if (q.val > 0) rrect(154, top + h / 2 + 10, std::max(4, 144 * q.val / 100), 4, 2, q.col);
+      if (i < n - 1) cv.fillRect(154, top + h - 1, 144, 1, c565(mix(T.panel, T.dim, .22f)));
+    }
+    return;
+  }
   auto v = faceSubs(s, 3);
   int n = v.size(), h = cRowH(n), top0 = cTop0(n);
   for (int i = 0; i < n; i++) {
@@ -411,7 +499,8 @@ static void homeD(const State& s, const Cfg& c, const Theme& T, const Lv& L, uin
 
 static void pageHome(const State& s, const Cfg& c, const Theme& T, const Lv& L, uint32_t t, bool grey, bool happy) {
   Expr e = happy ? E_HAPPY : E_CALM;
-  if (c.home == "A") homeA(s, c, T, L, t, grey, e);
+  if (s.subs.empty()) homeD(s, c, T, L, t, grey, e);   // 还没读到任何额度：只有脸
+  else if (c.home == "A") homeA(s, c, T, L, t, grey, e);
   else if (c.home == "C") homeC(s, c, T, L, t, grey, e);
   else if (c.home == "D") homeD(s, c, T, L, t, grey, e);
   else homeB(s, c, T, L, t, grey, e);
@@ -420,6 +509,7 @@ static void pageHome(const State& s, const Cfg& c, const Theme& T, const Lv& L, 
 }
 
 bool uiFaceHit(const State& s, const Cfg& c, int x, int y, String& subId) {
+  if (s.subs.size() == 1) { subId = s.subs[0].id; return true; }   // 只有一家：点哪里都直接看它的明细
   if ((c.home == "B" || c.home == "D" || c.home.length() == 0) && gChip.hit(x, y)) { subId = gChip.id; return true; }
   if (c.home == "A") {
     auto v = faceSubs(s, 3);

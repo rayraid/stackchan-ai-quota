@@ -19,7 +19,9 @@ struct AppSettings: Codable, Equatable {
     var brightness = 70
     var pinned: [String] = ["claude", "codex"]
     var autoThird = true             // 第 3 格自动放最紧张的一家
-    var windowPref = "auto"          // 老设置（所有家一起）：auto / 5h / week；没在 subWindow 里单独选的家沿用它
+    var windowPref = "auto"          // 额度显示逻辑（没在 subWindow 里单独选的家都用它）：
+                                     //   auto 最紧张的那个，但不算「只限某个模型」的额度（比如 Claude 的 Fable 本周）
+                                     //   tightest 最紧张的那个，所有额度都算  week 尽量显示每周  5h 尽量显示 5 小时
     var subWindow: [String: String] = [:]   // 每家显示哪个额度：订阅 id → 时间段的 key（QuotaWindow.key）
     var showUsed = false
     var clock = false
@@ -61,6 +63,7 @@ struct AppSettings: Codable, Equatable {
     var led = true
     var ledBright = 50
     var ledIdle = "#3ddc84"
+    var ledIdleOn = true             // 平时也亮着：关掉后没事时灯是灭的，有 AI 等你、额度快用完时照样亮
     var ledAttn = "#ffb020"
     var touch = 0                    // 平时摸头：0 开心一下  1 切换页面  2 什么都不做（提醒那几秒里摸头总是提前收起）
 
@@ -75,7 +78,8 @@ struct AppSettings: Codable, Equatable {
     var qBright = 10
     var qFace = true
     var restWhenLocked = true
-    var dndUntil: Date? = nil
+    var dndUntil: Date? = nil        // 手动勿扰到什么时候（很远的将来 = 直到你关掉）
+    var quietSkipUntil: Date? = nil  // 定时勿扰时段里在面板上关掉了勿扰：到这个时间之前不算勿扰时段
 
     // 订阅与数据
     var cliInterval = 300
@@ -84,6 +88,9 @@ struct AppSettings: Codable, Equatable {
     var subHidden: [String] = []
     var subMono: [String: String] = [:]
     var subHue: [String: String] = [:]
+    var subMid: [String: Int] = [:]  // 某一家单独的黄线（没有 = 跟随总设置）
+    var subLow: [String: Int] = [:]  // 某一家单独的红线
+    var singleWins: [String] = []    // 只有一家时，首页每一格放它的哪个时间段（QuotaWindow.key；空 = 自动）
     var showIcons = true             // 有图标时，机器人和菜单栏用图标代替字母
 
     // 连接
@@ -126,7 +133,7 @@ enum SettingsFile {
            let saved = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let defData = try? JSONEncoder.iso.encode(s),
            var merged = try? JSONSerialization.jsonObject(with: defData) as? [String: Any] {
-            for (k, v) in saved where merged[k] != nil || k == "dndUntil" { merged[k] = v }
+            for (k, v) in saved where merged[k] != nil || k == "dndUntil" || k == "quietSkipUntil" { merged[k] = v }
             if let md = try? JSONSerialization.data(withJSONObject: merged),
                let decoded = try? JSONDecoder.iso.decode(AppSettings.self, from: md) {
                 s = decoded
@@ -135,6 +142,10 @@ enum SettingsFile {
         if s.migrated < 22 {             // 2.2：提醒画面默认停 10 秒（原来默认 5 秒的跟着改）
             if s.alertSecs == 5 { s.alertSecs = 10 }
             s.migrated = 22
+        }
+        if s.migrated < 23 {             // 2.3：「平时的颜色」里那个没写字的「关」改成单独的「平时也亮着」开关
+            if s.ledIdle.isEmpty { s.ledIdleOn = false; s.ledIdle = "#3ddc84" }
+            s.migrated = 23
         }
         if s.token.isEmpty { s.token = randomToken() }
         if s.macId.isEmpty { s.macId = randomToken(6).lowercased() }

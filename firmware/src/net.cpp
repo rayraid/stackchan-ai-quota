@@ -169,6 +169,10 @@ bool parseState(const String& body, State& s) {
     s.subs.push_back(b);
   }
   for (JsonVariant v : doc["face"].as<JsonArray>()) s.face.push_back((const char*)(v | ""));
+  if (doc["split"].is<JsonObjectConst>()) {
+    s.splitId = (const char*)(doc["split"]["id"] | "");
+    for (JsonVariant v : doc["split"]["w"].as<JsonArray>()) s.splitW.push_back(v | -1);
+  }
   for (JsonObject o : doc["waiting"].as<JsonArray>()) {
     Wait w;
     w.id = (const char*)(o["id"] | "");

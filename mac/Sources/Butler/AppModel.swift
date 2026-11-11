@@ -62,6 +62,7 @@ final class AppModel: ObservableObject {
                 DispatchQueue.global().async { self.engine.sweep() }
                 self.device = self.engine.device
                 if let u = self.settings.dndUntil, u < Date() { self.settings.dndUntil = nil }
+                if let u = self.settings.quietSkipUntil, u < Date() { self.settings.quietSkipUntil = nil }
             }
         })
         watchSleepAndLock()
@@ -216,13 +217,42 @@ final class AppModel: ObservableObject {
             }
         }
     }
-    func snooze(hours: Double) { settings.dndUntil = Date().addingTimeInterval(hours * 3600) }
+    func snooze(hours: Double) { settings.quietSkipUntil = nil; settings.dndUntil = Date().addingTimeInterval(hours * 3600) }
     func snoozeUntilMorning() {
         let cal = Calendar.current
         var d = cal.date(bySettingHour: 8, minute: 0, second: 0, of: Date())!
         if d < Date() { d = cal.date(byAdding: .day, value: 1, to: d)! }
+        settings.quietSkipUntil = nil
         settings.dndUntil = d
     }
+    /// 勿扰开关：choice 1 = 1 小时，0 = 到明早 8 点，2 = 直到你关掉
+    func setDnd(_ on: Bool, choice: Int) {
+        if on {
+            switch choice {
+            case 0: snoozeUntilMorning()
+            case 2: settings.quietSkipUntil = nil; settings.dndUntil = .distantFuture
+            default: snooze(hours: 1)
+            }
+        } else {
+            var s = settings
+            s.dndUntil = nil
+            if Engine.quietNow(s) { s.quietSkipUntil = Engine.quietEnds(s) }   // 定时勿扰时段里关掉 = 这一段先不勿扰
+            settings = s
+        }
+    }
+    /// 勿扰现在的说法：nil = 没开；否则是「到 12:41」「直到你关掉」「勿扰时段 · 到 08:00」
+    var dndText: String? {
+        if let u = settings.dndUntil, u > Date() {
+            return u.timeIntervalSinceNow > 30 * 86400 ? t("直到你关掉") : t("到 %@", DateFormatter.cached("HH:mm").string(from: u))
+        }
+        return quietNow ? t("勿扰时段 · 到 %@", settings.quietEnd) : nil
+    }
+    /// 打开设置窗口的某一页
+    func showSettings(_ page: SettingsPage? = nil) {
+        if let p = page { UserDefaults.standard.set(p.rawValue, forKey: "settingsPage") }
+        Openers.settings?()
+    }
+    let startedAt = Date()
     func send(_ what: String) { engine.send(what) }
     func testAlert() {
         let l = lang
