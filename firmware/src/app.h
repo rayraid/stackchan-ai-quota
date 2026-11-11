@@ -5,7 +5,7 @@
 #include <ArduinoJson.h>
 #include <vector>
 
-#define FW_VERSION "2.1.2"
+#define FW_VERSION "2.2.0"
 
 struct Win  { String label, level, reset, pace; int left = 0; int mins = 0; };   // mins：这个额度的周期（分钟），0 = 不知道
 struct Sub  { String id, name, mono, label, level, reset, error, icon; uint32_t hue = 0xaab2bd; int left = -1; bool stale = false; std::vector<Win> wins; };
@@ -41,6 +41,7 @@ struct State {
   uint32_t now = 0;
   std::vector<Sub> subs;
   std::vector<String> face;
+  String splitId; std::vector<int> splitW;   // 只有一家订阅时：首页拆成它的这几个时间段（下标对应 wins）
   std::vector<Wait> waiting;
   std::vector<Low> lows;
   Cfg cfg;

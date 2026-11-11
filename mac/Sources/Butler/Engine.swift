@@ -42,6 +42,8 @@ struct Subscription: Identifiable, Hashable {
     var ts: Double; var stale: Bool; var source: String; var plan: String
     var shown: QuotaWindow?        // 按设置挑出来显示的那个时间段
     var hidden: Bool
+    var error = ""                 // 最近一次读不到的原因（CodexBar 给的原话）
+    var via = ""                   // CodexBar 这次是怎么读到的：web / oauth / cli / api…
 }
 struct WaitItem: Identifiable, Hashable {
     var id: String; var agent: String; var mono: String; var project: String
@@ -74,6 +76,7 @@ final class Engine: @unchecked Sendable {
     private var cliTs: [String: Double] = [:]
     private var order: [String] = []
     private var cliBad: Set<String> = []
+    private var cliErr: [String: String] = [:]
     private var shared: [String: [String: Any]] = [:]
     private var sharedTs: [String: Double] = [:]
     private var sharedMtime: Double = 0
@@ -123,6 +126,11 @@ final class Engine: @unchecked Sendable {
         lock.withLock {
             if !fresh.isEmpty { order = fresh.map { $0.0 } }
             cliBad = Set(fresh.filter { $0.1["error"] != nil }.map { $0.0 })
+            for (k, v) in fresh {
+                if let e = v["error"] as? [String: Any] { cliErr[k] = e["message"] as? String ?? "" }
+                else if let e = v["error"] as? String { cliErr[k] = e }
+                else { cliErr[k] = nil }
+            }
             for (k, v) in fresh where v["error"] == nil { cli[k] = v; cliTs[k] = now }
             lastCliError = ""
         }
@@ -155,8 +163,9 @@ final class Engine: @unchecked Sendable {
         onChange()
     }
 
-    private func level(_ left: Int, _ s: AppSettings) -> String {
-        left < s.lowPercent ? "low" : left < s.midPercent ? "mid" : "ok"
+    private func level(_ left: Int, _ s: AppSettings, _ pid: String = "") -> String {
+        let low = s.subLow[pid] ?? s.lowPercent, mid = s.subMid[pid] ?? s.midPercent
+        return left < low ? "low" : left < mid ? "mid" : "ok"
     }
 
     private func groupOf(_ label: String?) -> String {
@@ -172,7 +181,7 @@ final class Engine: @unchecked Sendable {
         return groupOf(t)
     }
 
-    private func windows(_ base: [String: Any], extras: [[String: Any]], labels: [String: Any], pace: [String: Any], s: AppSettings, l: Lang) -> [QuotaWindow] {
+    private func windows(_ base: [String: Any], extras: [[String: Any]], labels: [String: Any], pace: [String: Any], s: AppSettings, l: Lang, pid: String) -> [QuotaWindow] {
         var wins: [(QuotaWindow, String)] = []
         var seen = Set<String>()
         func add(_ group: String, _ w: [String: Any], _ p: [String: Any]?, _ key: String) {
@@ -183,7 +192,7 @@ final class Engine: @unchecked Sendable {
             let label = (group.isEmpty ? "" : group + " ") + Gen.windowLabel(minutes, l)
             let reset = Gen.resetText(parseISO(w["resetsAt"] as? String), minutes: minutes, l)
             let paceText = Gen.paceText(etaSeconds: (p?["etaSeconds"] as? NSNumber)?.doubleValue, willLast: (p?["willLastToReset"] as? Bool) ?? true, l)
-            wins.append((QuotaWindow(label: label, left: left, level: level(left, s), reset: reset, pace: paceText, minutes: minutes, key: group + "|" + String(minutes)), group))
+            wins.append((QuotaWindow(label: label, left: left, level: level(left, s, pid), reset: reset, pace: paceText, minutes: minutes, key: group + "|" + String(minutes)), group))
         }
         for slot in SLOTS {
             guard let w = base[slot] as? [String: Any] else { continue }
@@ -218,20 +227,15 @@ final class Engine: @unchecked Sendable {
                 let useShared = !su.isEmpty && (cliBad.contains(pid) || cTs == 0) && sTs > cTs
                 let base = useShared ? su : cu
                 let extras = (base["extraRateWindows"] as? [[String: Any]]) ?? (cu["extraRateWindows"] as? [[String: Any]]) ?? []
-                let wins = windows(base, extras: extras, labels: c["rateWindowLabels"] as? [String: Any] ?? [:], pace: c["pace"] as? [String: Any] ?? [:], s: s, l: l)
+                let wins = windows(base, extras: extras, labels: c["rateWindowLabels"] as? [String: Any] ?? [:], pace: c["pace"] as? [String: Any] ?? [:], s: s, l: l, pid: pid)
                 let ts = useShared ? sTs : cTs
-                let info = PROVIDERS[pid] ?? .init(name: pid.capitalized, mono: String(pid.prefix(2)).uppercased(), hue: "#aab2bd")
+                let info = PROVIDERS[pid] ?? .init(name: ProviderNames.get(pid) ?? pid.capitalized, mono: String(pid.prefix(2)).uppercased(), hue: "#aab2bd")
                 var sub = Subscription(id: pid, name: info.name, mono: s.subMono[pid] ?? info.mono, hue: s.subHue[pid] ?? info.hue,
                                        windows: wins, ts: ts, stale: ts == 0 || now - ts > Double(s.staleMinutes * 60),
                                        source: ts == 0 ? "" : (useShared ? "app" : "cli"), plan: cu["loginMethod"] as? String ?? "",
-                                       shown: nil, hidden: s.subHidden.contains(pid))
-                if !wins.isEmpty {
-                    var pick = wins.min { $0.left < $1.left }
-                    if let k = s.subWindow[pid], let w = wins.first(where: { $0.key == k }) { pick = w }   // 这一家单独选过
-                    else if s.windowPref == "5h", let w = wins.first(where: { $0.minutes == 300 }) { pick = w }
-                    else if s.windowPref == "week", let w = wins.first(where: { $0.minutes == 10080 }) { pick = w }
-                    sub.shown = pick
-                }
+                                       shown: nil, hidden: s.subHidden.contains(pid),
+                                       error: cliBad.contains(pid) ? (cliErr[pid] ?? "") : "", via: useShared ? "app" : c["source"] as? String ?? "")
+                if !wins.isEmpty { sub.shown = Engine.pickWindow(wins, choice: s.subWindow[pid], pref: s.windowPref) }
                 out.append(sub)
             }
             if !s.subOrder.isEmpty {
@@ -242,6 +246,44 @@ final class Engine: @unchecked Sendable {
             }
             return out
         }
+    }
+
+    /// 按「额度显示逻辑」挑这一家显示哪个时间段。choice 是这一家单独选的 key（subWindow），pref 是总的 windowPref（auto / tightest / week / 5h）。
+    /// 「只限某个模型」的额度（分组名非空，比如 Claude 的 Fable 本周）在 auto / week / 5h 下让位给总额度；只有这种额度的家照常挑。
+    static func pickWindow(_ wins: [QuotaWindow], choice: String?, pref: String) -> QuotaWindow? {
+        if let c = choice, let w = wins.first(where: { $0.key == c }) { return w }      // 这一家单独选过
+        let general = wins.filter { $0.key.hasPrefix("|") }
+        let pool = general.isEmpty ? wins : general
+        let tightest = { (ws: [QuotaWindow]) in ws.min { $0.left < $1.left } }
+        switch pref {
+        case "tightest": return tightest(wins)
+        case "week": return pool.first { $0.minutes == 10080 } ?? wins.first { $0.minutes == 10080 } ?? tightest(pool)
+        case "5h": return pool.first { $0.minutes == 300 } ?? wins.first { $0.minutes == 300 } ?? tightest(pool)
+        default: return tightest(pool)
+        }
+    }
+
+    /// 只有一家订阅时，首页的几格放它的哪几个时间段（下标对应 sub.windows）。
+    /// 默认：总额度按周期从短到长（不算只限某个模型的）；不够两个就把所有时间段都算上。少于两个就不拆。
+    static func splitWindows(_ sub: Subscription, _ s: AppSettings) -> [Int] {
+        let ws = sub.windows
+        guard ws.count >= 2 else { return [] }
+        let slots = s.homeStyle == "B" ? 2 : 3
+        var auto = ws.indices.filter { ws[$0].key.hasPrefix("|") }
+        if auto.count < 2 { auto = Array(ws.indices) }
+        auto.sort { ws[$0].minutes < ws[$1].minutes }
+        var out: [Int] = []
+        for i in 0..<slots {
+            let want = i < s.singleWins.count ? s.singleWins[i] : ""
+            if let k = ws.firstIndex(where: { $0.key == want }), !want.isEmpty, !out.contains(k) { out.append(k); continue }
+            if let k = auto.first(where: { !out.contains($0) }) { out.append(k) }
+        }
+        return out.count >= 2 ? out : []
+    }
+    /// 现在看得到的订阅是不是只有一家（这时首页拆成它的几个时间段、点屏幕直接进明细）
+    static func single(_ subs: [Subscription]) -> Subscription? {
+        let vis = subs.filter { !$0.hidden }
+        return vis.count == 1 ? vis[0] : nil
     }
 
     /// 平时画面底部 3 格：固定的几家 + 最紧张的一家
@@ -533,6 +575,7 @@ final class Engine: @unchecked Sendable {
                 return d
             },
             "face": faceIds(subs, s),
+            "split": Engine.single(subs).map { one -> [String: Any] in ["id": one.id, "w": Engine.splitWindows(one, s)] } ?? NSNull(),
             "lows": lows,
             "waiting": wait.map { w -> [String: Any] in
                 let iid = s.showIcons ? IconStore.idForAgent(w.kind == "restored" ? "" : w.agent) : ""
@@ -557,6 +600,7 @@ final class Engine: @unchecked Sendable {
     static func quietNow(_ s: AppSettings, _ now: Date = Date()) -> Bool {
         if let u = s.dndUntil, u > now { return true }
         guard s.quietOn else { return false }
+        if let k = s.quietSkipUntil, k > now { return false }
         let cal = Calendar.current
         let wd = cal.component(.weekday, from: now)
         let weekend = wd == 1 || wd == 7
@@ -565,6 +609,13 @@ final class Engine: @unchecked Sendable {
         let m = cal.component(.hour, from: now) * 60 + cal.component(.minute, from: now)
         let a = minutes(s.quietStart), b = minutes(s.quietEnd)
         return a < b ? (m >= a && m < b) : (m >= a || m < b)
+    }
+    /// 定时勿扰这一段什么时候结束（下一个「结束时间」）
+    static func quietEnds(_ s: AppSettings, _ now: Date = Date()) -> Date {
+        let m = minutes(s.quietEnd), cal = Calendar.current
+        var d = cal.date(bySettingHour: m / 60, minute: m % 60, second: 0, of: now) ?? now
+        if d <= now { d = cal.date(byAdding: .day, value: 1, to: d) ?? d }
+        return d
     }
     static func minutes(_ hm: String) -> Int {
         let p = hm.split(separator: ":").compactMap { Int($0) }
@@ -580,7 +631,7 @@ final class Engine: @unchecked Sendable {
             "sleepy": s.sleepyNight && (h >= 23 || h < 7), "dim_after": s.dimAfter,
             "alert": s.alertLevel, "remind": s.remind, "motion": s.motion, "nod": s.nod, "pitch": s.pitch,
             "wander": s.wander, "shake_low": s.shakeLow, "sound": s.sound, "volume": s.volume, "tone": s.tone,
-            "led": s.led, "led_bright": s.ledBright, "led_idle": s.ledIdle, "led_attn": s.ledAttn, "touch": s.touch,
+            "led": s.led, "led_bright": s.ledBright, "led_idle": s.ledIdleOn ? s.ledIdle : "", "led_attn": s.ledAttn, "touch": s.touch,
             "name": s.robotName, "lang": Lang.resolve(s.language).rawValue,
             "quiet": quietNow(s, now), "q_still": s.qStill, "q_mute": s.qMute, "q_dark": s.qDark,
             "q_bright": s.qBright, "q_face": s.qFace,
@@ -605,7 +656,8 @@ func parseISO(_ s: String?) -> Date? {
 enum Shell {
     struct Result { var status: Int32; var stdout: Data; var stderr: Data }
 
-    static func run(_ path: String, _ args: [String], timeout: Double = 60, cwd: String? = nil, env: [String: String]? = nil) -> Result {
+    /// input：写进程序标准输入的内容（API Key、Cookie 走这里，不放在命令行参数里，免得别的程序用 ps 看到）
+    static func run(_ path: String, _ args: [String], timeout: Double = 60, cwd: String? = nil, env: [String: String]? = nil, input: Data? = nil) -> Result {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: path)
         p.arguments = args
@@ -613,11 +665,14 @@ enum Shell {
         if let env { p.environment = ProcessInfo.processInfo.environment.merging(env) { $1 } }
         let o = Pipe(), e = Pipe()
         p.standardOutput = o; p.standardError = e
+        let inPipe = input.map { _ in Pipe() }
+        if let inPipe { p.standardInput = inPipe }
         var outData = Data(), errData = Data()
         let g = DispatchGroup()
         g.enter(); DispatchQueue.global().async { outData = o.fileHandleForReading.readDataToEndOfFile(); g.leave() }
         g.enter(); DispatchQueue.global().async { errData = e.fileHandleForReading.readDataToEndOfFile(); g.leave() }
         do { try p.run() } catch { return Result(status: -1, stdout: Data(), stderr: Data(error.localizedDescription.utf8)) }
+        if let inPipe, let input { inPipe.fileHandleForWriting.write(input); try? inPipe.fileHandleForWriting.close() }
         let killer = DispatchWorkItem { if p.isRunning { p.terminate() } }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: killer)
         p.waitUntilExit()

@@ -94,7 +94,7 @@ private func minutesBinding(_ b: Binding<String>) -> Binding<Date> {
     )
 }
 
-private struct SliderRow: View {
+struct SliderRow: View {
     var title: String
     var note: String = ""
     @Binding var value: Int
@@ -134,7 +134,7 @@ struct GeneralPage: View {
             }
             Section {
                 LabeledContent {
-                    Button(t("重新运行…")) { openWindow(id: "wizard") }
+                    Button(t("重新运行…")) { openWizard(0, openWindow) }
                 } label: { Text(t("安装向导")); Text(t("换了 WiFi、换了新机器人时用")) }
                 LabeledContent(t("导出 / 导入设置")) {
                     Button(t("导出…")) { exportSettings() }
@@ -206,6 +206,17 @@ struct DisplayPage: View {
                 // 跟着首页样式变：A 三格、B 两只眼睛、C 气泡三行、D 不放
                 let subs = model.subs.filter { !$0.hidden }
                 let slots = Self.slotNames(model.settings.homeStyle)
+                if let one = Engine.single(model.subs) {
+                    // 只有一家：每一格放它的哪个时间段
+                    let split = Engine.splitWindows(one, model.settings)
+                    ForEach(Array(slots.prefix(model.settings.homeStyle == "B" ? 2 : 3).enumerated()), id: \.offset) { i, name in
+                        Picker(t(name), selection: singleBinding(i)) {
+                            Text(t("自动（%@）", i < split.count ? one.windows[split[i]].label : "—")).tag("")
+                            Divider()
+                            ForEach(one.windows, id: \.key) { w in Text("\(w.label) · \(w.left)%").tag(w.key) }
+                        }
+                    }
+                } else {
                 if slots.count > 0 { Picker(t(slots[0]), selection: pinBinding(0)) { ForEach(subs) { Text($0.name).tag($0.id) } } }
                 if slots.count > 1 { Picker(t(slots[1]), selection: pinBinding(1)) { ForEach(subs) { Text($0.name).tag($0.id) } } }
                 if slots.count > 2 {
@@ -214,15 +225,26 @@ struct DisplayPage: View {
                         ForEach(subs) { Text($0.name).tag($0.id) }
                     }
                 }
+                }
                 Picker(t("数字表示"), selection: $model.settings.showUsed) {
                     Text(t("还剩多少")).tag(false); Text(t("用了多少")).tag(true)
                 }.pickerStyle(.segmented)
-            } header: { Text(t("内容")) } footer: { Text(t(Self.slotNote(model.settings.homeStyle)) + t("点机器人的屏幕可以看全部。")) }
+            } header: { Text(t("内容")) } footer: {
+                if let one = Engine.single(model.subs), model.settings.homeStyle != "D" {
+                    Text(t("只有 %@ 一家：首页分成它的几个时间段，点机器人的屏幕直接看明细。", one.name))
+                } else { Text(t(Self.slotNote(model.settings.homeStyle)) + t("点机器人的屏幕可以看全部。")) }
+            }
             Section {
+                Picker(selection: $model.settings.windowPref) {
+                    Text(t("最紧张的那个（不算单个模型）")).tag("auto")
+                    Text(t("最紧张的那个（单个模型也算）")).tag("tightest")
+                    Text(t("尽量显示每周")).tag("week")
+                    Text(t("尽量显示 5 小时")).tag("5h")
+                } label: { Text(t("显示逻辑")); Text(t("比如 Claude 的「Fable 本周」只算一个模型，默认不拿它和总额度比")) }
                 ForEach(model.subs.filter { !$0.hidden }) { sub in
                     if sub.windows.count > 1 {
                         Picker(selection: windowBinding(sub.id)) {
-                            Text(t("自动：最紧张的那个")).tag("")
+                            Text(t("按显示逻辑（现在是 %@）", Engine.pickWindow(sub.windows, choice: nil, pref: model.settings.windowPref)?.label ?? "—")).tag("")
                             Divider()
                             ForEach(sub.windows, id: \.key) { w in Text("\(w.label) · \(w.left)%").tag(w.key) }
                         } label: { HStack(spacing: 8) { BrandBadge(id: sub.id, mono: sub.mono, hue: sub.hue); Text(sub.name) } }
@@ -265,6 +287,14 @@ struct DisplayPage: View {
     private func windowBinding(_ id: String) -> Binding<String> {
         Binding(get: { model.settings.subWindow[id] ?? "" }, set: { v in
             if v.isEmpty { model.settings.subWindow.removeValue(forKey: id) } else { model.settings.subWindow[id] = v }
+        })
+    }
+    private func singleBinding(_ i: Int) -> Binding<String> {
+        Binding(get: { i < model.settings.singleWins.count ? model.settings.singleWins[i] : "" }, set: { v in
+            var w = model.settings.singleWins
+            while w.count <= i { w.append("") }
+            w[i] = v
+            model.settings.singleWins = w
         })
     }
     private func pinBinding(_ i: Int) -> Binding<String> {
@@ -416,14 +446,18 @@ struct MotionPage: View {
                 }
             }
             Section(t("灯")) {
+                let on = model.settings.led, idle = on && model.settings.ledIdleOn
                 Toggle(t("彩灯"), isOn: $model.settings.led)
-                SliderRow(title: t("亮度"), value: $model.settings.ledBright)
+                Toggle(isOn: $model.settings.ledIdleOn) {
+                    Text(t("平时也亮着")); Text(t("没事的时候亮一盏微弱的灯。关掉后，只在有 AI 等你、额度快用完时亮"))
+                }.disabled(!on)
                 LabeledContent(t("平时的颜色")) {
-                    Swatches(selection: $model.settings.ledIdle, colors: [("#3ddc84", t("绿")), ("#4aa3ff", t("蓝")), ("#b28cff", t("紫")), ("#ffffff", t("白")), ("", t("关"))])
-                }
+                    Swatches(selection: $model.settings.ledIdle, colors: [("#3ddc84", t("绿")), ("#4aa3ff", t("蓝")), ("#b28cff", t("紫")), ("#ffffff", t("白"))])
+                }.disabled(!idle).opacity(idle ? 1 : 0.4)
                 LabeledContent(t("等你时的颜色")) {
                     Swatches(selection: $model.settings.ledAttn, colors: [("#ffb020", t("琥珀")), ("#ff7a1a", t("橙")), ("#ff4fa3", t("粉")), ("#4aa3ff", t("蓝"))])
-                }
+                }.disabled(!on).opacity(on ? 1 : 0.4)
+                SliderRow(title: t("亮度"), value: $model.settings.ledBright).disabled(!on)
             }
             Section(t("头顶触摸")) {
                 Picker(selection: $model.settings.touch) {
@@ -478,7 +512,9 @@ struct QuietPage: View {
 // ---------- 订阅与数据 ----------
 struct DataPage: View {
     @ObservedObject var model = AppModel.shared
-    @State private var authorizing = false
+    @ObservedObject var store = ProvidersStore.shared
+    @State private var editing: String?
+    @State private var adding = false
     var body: some View {
         Form {
             Section {
@@ -498,43 +534,22 @@ struct DataPage: View {
                 } label: { Text(t("超过多久没更新算「过期」")); Text(t("过期的数字会变灰")) }
             }
             Section {
+                let ids = store.rowIds(model.subs)
                 List {
-                    ForEach(model.subs) { s in
-                        HStack(spacing: 10) {
-                            BrandBadge(id: s.id, mono: s.mono, hue: s.hue)
-                            Text(s.name).frame(minWidth: 110, alignment: .leading)
-                            Spacer()
-                            Text(t("简称")).foregroundStyle(.secondary).font(.caption)
-                            TextField("", text: Binding(get: { model.settings.subMono[s.id] ?? s.mono }, set: { v in
-                                model.settings.subMono[s.id] = String(v.uppercased().prefix(2))
-                            })).frame(width: 40).multilineTextAlignment(.center)
-                            Menu {
-                                Button(t("选择图片…")) { pickIcon(s.id) }
-                                Button(t("用字母")) { IconStore.remove(s.id); model.refresh(); model.objectWillChange.send() }
-                                Divider()
-                                Section(t("字母颜色")) {
-                                    ForEach(Self.letterColors, id: \.0) { c in
-                                        Button { model.settings.subHue[s.id] = c.0 } label: {
-                                            Label { Text(t(c.1)) } icon: { Image(nsImage: swatchImage(c.0)) }
-                                        }
-                                    }
-                                }
-                            } label: { Image(nsImage: swatchImage(s.hue, size: 14)) }
-                                .menuStyle(.borderlessButton).frame(width: 34)
-                            Toggle("", isOn: Binding(get: { !model.settings.subHidden.contains(s.id) }, set: { on in
-                                model.settings.subHidden.removeAll { $0 == s.id }
-                                if !on { model.settings.subHidden.append(s.id) }
-                            })).toggleStyle(.switch).controlSize(.mini).labelsHidden()
+                    ForEach(ids, id: \.self) { id in ProviderRow(id: id) { editing = id } }
+                        .onMove { from, to in
+                            var o = ids
+                            o.move(fromOffsets: from, toOffset: to)
+                            model.settings.subOrder = o
                         }
-                    }
-                    .onMove { from, to in
-                        var ids = model.subs.map { $0.id }
-                        ids.move(fromOffsets: from, toOffset: to)
-                        model.settings.subOrder = ids
-                    }
                 }
-                .frame(minHeight: CGFloat(max(1, model.subs.count)) * 34 + 10)
-            } header: { Text(t("订阅（拖动排序）")) } footer: { Text(t("点右边的色点可以换成自己的图片、换回字母，或者改字母的颜色。")) }
+                .frame(minHeight: CGFloat(max(1, ids.count)) * 44 + 10)
+                HStack {
+                    Button(t("添加服务商…")) { adding = true }.disabled(store.caps.isEmpty)
+                    if store.loading { ProgressView().controlSize(.small) }
+                    Spacer()
+                }
+            } header: { Text(t("服务商（拖动排序）")) } footer: { Text(t("读取方式、API Key、提醒线、简称和图标都在每一家的「设置…」里。这些读取设置存在 CodexBar 的配置文件里，装了 CodexBar 应用的话两边共用。")) }
             Section {
                 Toggle(t("用图标代替字母"), isOn: $model.settings.showIcons)
                 LabeledContent {
@@ -553,25 +568,32 @@ struct DataPage: View {
                     }
                 }
             } header: { Text(t("图标")) } footer: { Text(t("这些 logo 是各公司的商标，小管家不带、也不上传。")) }
-            Section {
-                LabeledContent {
-                    Button(authorizing ? t("请在弹出的窗口里点「始终允许」…") : t("重新授权…")) {
-                        authorizing = true
-                        Env.authorizeClaude { _ in DispatchQueue.main.async { authorizing = false; model.refreshNow() } }
-                    }.disabled(authorizing)
-                } label: { Text(t("Claude 读不到时")); Text(t("会弹出钥匙串窗口，点「始终允许」")) }
+        }
+        .formStyle(.grouped)
+        .onAppear { store.load(); if let id = DataPage.openProvider { DataPage.openProvider = nil; editing = id } }
+        .sheet(item: Binding(get: { editing.map { IdBox(id: $0) } }, set: { editing = $0?.id })) { b in
+            ProviderSheet(id: b.id) { editing = nil }
+        }
+        .sheet(isPresented: $adding) {
+            AddProviderSheet { id in
+                adding = false
+                if let id { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { editing = id } }
             }
-        }.formStyle(.grouped)
+        }
     }
 }
 
+struct IdBox: Identifiable { var id: String }
+
 extension DataPage {
+    /// 从别处（菜单栏面板的黄条）打开设置时，直接打开某一家的设置页
+    @MainActor static var openProvider: String?
     static let letterColors: [(String, String)] = [
         ("#e08a63", "陶土"), ("#7c9cff", "蓝"), ("#cfd4dc", "银"), ("#5fd3bc", "青绿"), ("#b28cff", "紫"),
         ("#8ab4ff", "天蓝"), ("#9be29b", "绿"), ("#ffd27a", "琥珀"), ("#ff8fb1", "粉"),
     ]
     /// 菜单里的小色块（不当模板图，保留颜色）
-    func swatchImage(_ hex: String, size: CGFloat = 12) -> NSImage {
+    static func swatch(_ hex: String, size: CGFloat = 12) -> NSImage {
         let img = NSImage(size: NSSize(width: size, height: size), flipped: false) { r in
             NSColor(Color(hex: hex)).setFill()
             NSBezierPath(ovalIn: r.insetBy(dx: 0.5, dy: 0.5)).fill()
@@ -581,12 +603,12 @@ extension DataPage {
         return img
     }
 
-    func pickIcon(_ id: String) {
+    @MainActor static func pickIcon(_ id: String) {
         let p = NSOpenPanel()
         p.allowedContentTypes = [.png, .svg, .jpeg]
         if p.runModal() == .OK, let u = p.url, IconStore.importImage(id, from: u) {
-            model.settings.showIcons = true
-            model.refresh(); model.objectWillChange.send()
+            AppModel.shared.settings.showIcons = true
+            AppModel.shared.refresh(); AppModel.shared.objectWillChange.send()
         }
     }
 }
@@ -618,7 +640,7 @@ struct DevicePage: View {
             }
             Section {
                 LabeledContent {
-                    Button(t("更改…")) { openWindow(id: "wizard") }
+                    Button(t("更改…")) { openWizard(1, openWindow) }
                 } label: { Text("WiFi"); Text(t("改 WiFi 要插上 USB 线")) }
                 LabeledContent(t("地址"), value: model.device?.ip ?? "—")
                 LabeledContent(t("电量"), value: model.deviceOnline ? (model.device?.batteryLong ?? "—") : "—")
@@ -646,7 +668,7 @@ struct DevicePage: View {
         }
         .formStyle(.grouped)
         .confirmationDialog(t("重新生成口令？"), isPresented: $confirmToken) {
-            Button(t("重新生成")) { model.settings.token = randomToken(); openWindow(id: "wizard") }
+            Button(t("重新生成")) { model.settings.token = randomToken(); openWizard(1, openWindow) }
         } message: { Text(t("机器人要插上 USB 线重新配置一次才能连上。")) }
         .alert(t("恢复出厂固件"), isPresented: $confirmRestore) {
             Button(t("打开备份文件夹")) { NSWorkspace.shared.open(Paths.backups) }

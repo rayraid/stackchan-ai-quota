@@ -65,6 +65,7 @@ struct RobotPreview: NSViewRepresentable {
             "state": state, "home": s.homeStyle, "list": s.listStyle, "detail": s.detailStyle, "alert": s.alertStyle, "theme": s.theme, "icons": icons, "eye": s.eye, "eyeColor": s.eyeColor, "clock": s.clock, "used": s.showUsed,
             "blink": s.blink, "look": s.look, "lang": model.lang.rawValue, "subs": subs,
             "face": model.engine.faceIds(model.subs, s), "mid": s.midPercent, "low": s.lowPercent,
+            "split": Engine.single(model.subs).map { one -> [String: Any] in ["id": one.id, "w": Engine.splitWindows(one, s)] } ?? NSNull(),
         ]
         for (k, v) in overrides { p[k] = v }
         guard let d = try? JSONSerialization.data(withJSONObject: p), let js = String(data: d, encoding: .utf8) else { return }
